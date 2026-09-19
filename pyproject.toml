@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stm32-installer"
+version = "1.0.0"
+description = "Install NimaLTD embedded C libraries into an STM32 project"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Nima Askari (NimaLTD)", email = "nima.askari@gmail.com" }]
+keywords = ["stm32", "embedded", "installer", "cubeide", "nimaltd"]
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Embedded Systems",
+]
+
+dependencies = ["PyYAML>=5.1"]
+
+[project.urls]
+Homepage = "https://github.com/nimaltd/stm32-installer"
+Issues = "https://github.com/nimaltd/stm32-installer/issues"
+
+[project.scripts]
+stm32-install = "stm32_installer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
