@@ -1,5 +1,7 @@
 """Tests for reading and validating library.yml."""
 
+from pathlib import Path
+
 import pytest
 
 from stm32_installer import manifest
@@ -14,20 +16,29 @@ def test_reads_the_basics(library):
     assert [p.name for p in found.sources] == ["demo.c"]
 
 
-def test_config_template_keeps_its_destination_name(library):
+def test_a_template_keeps_its_own_name_when_no_destination_is_given(library):
+    """Templates sit in template/ under their final name, so "to" is redundant."""
     found = manifest.load(library())
 
-    assert found.config[0].source.name == "demo_config_template.h"
+    assert found.config[0].source == Path("template/demo_config.h")
     assert found.config[0].destination == "demo_config.h"
+
+
+def test_an_explicit_destination_still_wins(library):
+    root = library(config=[{"from": "template/demo_config.h", "to": "renamed.h"}])
+
+    found = manifest.load(root)
+
+    assert found.config[0].destination == "renamed.h"
 
 
 def test_c_template_counts_as_a_source_to_compile(library):
     """A port layer shipped as a template still has to reach the build."""
     root = library(
-        extra_files={"src/demo_port_template.c": "/* port */\n"},
+        extra_files={"template/demo_port.c": "/* port */\n"},
         config=[
-            {"from": "inc/demo_config_template.h", "to": "demo_config.h"},
-            {"from": "src/demo_port_template.c", "to": "demo_port.c"},
+            {"from": "template/demo_config.h"},
+            {"from": "template/demo_port.c"},
         ],
     )
 

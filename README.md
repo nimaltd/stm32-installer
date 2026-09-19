@@ -101,15 +101,18 @@ files:
     - src/fsm.c
 
 config:                 # copied once, then it belongs to the user
-  - from: inc/fsm_config_template.h
-    to: fsm_config.h
+  - from: template/fsm_config.h
+  - from: template/fsm_port.c       # a .c template works the same way
+    to: my_port.c                   # "to" only when you want a different name
 
 extras: [LICENSE.md, NOTICE]   # this is the default, so it can be left out
 ```
 
+Templates live in `template/`, under the name they should end up with. That folder is stripped out after an install, so the copy the user edits is the only one left.
+
 Three things about this that are easy to get wrong:
 
-**A `.c` template is a source.** If you ship a port layer as `demo_port_template.c` that lands as `demo_port.c`, it is added to the build like any other source. Leaving it out would fail at link time with undefined references and no clue why.
+**A `.c` template is a source.** If you ship a port layer as `template/demo_port.c`, it is added to the build like any other source. Leaving it out would fail at link time with undefined references and no clue why.
 
 **`kind: rtos` implies `provides: [rtos]`.** A library that is an operating system satisfies another library's RTOS requirement, whether or not you remembered to write it down.
 

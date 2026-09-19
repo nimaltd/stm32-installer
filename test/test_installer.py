@@ -82,8 +82,20 @@ def test_in_place_removes_the_repository_scaffolding(library, tmp_path):
     assert not (root / ".github").exists()
     assert not (root / "inc").exists()
     assert not (root / "src").exists()
+    assert not (root / "template").exists()
     assert not (root / "library.yml").exists()
     assert "test" in result.removed
+
+
+def test_the_template_folder_goes_but_the_copy_stays(library, tmp_path):
+    """The user edits the copy. Leaving the template behind would only confuse."""
+    root = tmp_path / "Proj" / "demo"
+    library(root=root)
+
+    installer.install_in_place(manifest.load(root))
+
+    assert not (root / "template").exists()
+    assert (root / "demo_config.h").is_file()
 
 
 def test_in_place_keeps_the_licence_files(library, tmp_path):

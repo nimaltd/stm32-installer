@@ -39,6 +39,7 @@ DEFAULT_CLEANUP = [
     "test",
     "inc",
     "src",
+    "template",
     "CMakeLists.txt",
     "CONTRIBUTING.md",
     "library.yml",

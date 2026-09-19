@@ -135,8 +135,12 @@ class Manifest:
         files = data["files"]
         self.headers = [Path(p) for p in (files.get("headers") or [])]
         self.sources = [Path(p) for p in (files.get("sources") or [])]
+        # "to" is optional. Templates live in template/ under their final name,
+        # so the destination is normally just the file name, and saying it twice
+        # would only be one more thing to get out of step.
         self.config = [
-            ConfigFile(Path(entry["from"]), entry["to"]) for entry in (data.get("config") or [])
+            ConfigFile(Path(entry["from"]), entry.get("to") or Path(entry["from"]).name)
+            for entry in (data.get("config") or [])
         ]
         # Copied verbatim alongside the code. The Apache licence wants both of
         # these to travel with it, and NOTICE is what carries the attribution.

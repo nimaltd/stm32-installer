@@ -4,7 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stm32-installer"
-version = "1.0.0"
+# Read from stm32_installer.__version__, so the version lives in exactly one
+# place and cannot drift between the package and its metadata.
+dynamic = ["version"]
 description = "Install NimaLTD embedded C libraries into an STM32 project"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -31,3 +33,6 @@ stm32-install = "stm32_installer.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "stm32_installer.__version__" }

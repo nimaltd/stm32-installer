@@ -120,10 +120,10 @@ def test_a_c_template_reaches_every_build(library, project):
     lib, destination = _install(
         library,
         root,
-        extra_files={"src/demo_port_template.c": "/* port */\n"},
+        extra_files={"template/demo_port.c": "/* port */\n"},
         config=[
-            {"from": "inc/demo_config_template.h", "to": "demo_config.h"},
-            {"from": "src/demo_port_template.c", "to": "demo_port.c"},
+            {"from": "template/demo_config.h"},
+            {"from": "template/demo_port.c"},
         ],
     )
 

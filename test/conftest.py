@@ -36,10 +36,10 @@ def library(tmp_path):
         root.mkdir(parents=True, exist_ok=True)
 
         if config is None:
-            config = [{"from": "inc/demo_config_template.h", "to": "demo_config.h"}]
+            config = [{"from": "template/demo_config.h"}]
 
         written = {
-            "inc/demo_config_template.h": "#define DEMO_SIZE 8\n",
+            "template/demo_config.h": "#define DEMO_SIZE 8\n",
             "NOTICE": f"{name}\nCopyright 2026 Nima Askari (NimaLTD)\n",
         }
         written.update({h: f"/* {Path(h).name} */\n" for h in headers})
