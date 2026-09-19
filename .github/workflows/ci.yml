@@ -47,6 +47,8 @@ jobs:
           python -m pip install --upgrade build twine
           python -m build
 
-      # Catches the metadata problems PyPI would reject, before a release does.
+      # The metadata has to be valid for pip to install this from the GitHub
+      # archive, and a broken pyproject.toml fails at the worst moment: on a
+      # user's machine, part way through installing a library.
       - name: Check
         run: python -m twine check dist/*

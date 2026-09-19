@@ -27,7 +27,7 @@ stm32-install fsm
 
 You are asked which folder to use. Only the files the library actually needs are downloaded, not the whole repository.
 
-The first line is needed once, not once per library.
+The first line is needed once, not once per library. Run it again whenever you want the newest installer.
 
 Either way it then registers the library with your IDE, and prints what it needs from your CubeMX setup.
 
