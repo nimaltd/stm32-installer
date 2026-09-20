@@ -44,7 +44,17 @@ PowerShell needs `irm` rather than `curl`, because `curl` there is an alias for 
 curl -fsSL https://raw.githubusercontent.com/nimaltd/fsm/master/install.py -o install.py && python3 install.py
 ```
 
-You are asked which folder to use. Only the files the library actually needs are downloaded, not the whole repository. To install a different library with the same file, pass its name: `python install.py spif`.
+You are asked which folder to use. Only the files the library actually needs are downloaded, not the whole repository. Afterwards `install.py` deletes itself, so nothing is left lying in your project.
+
+It stays if you gave it a library name, since then you are using it as a tool and probably have another one to install: `python install.py nimaltd/spif`. It also stays if the install failed, so you can try again.
+
+**Pinning a version.** By default you get the newest code on the library's default branch. Add `--ref` to hold a project on one release:
+
+```bash
+python install.py --ref 2.0.0              # a tag
+python install.py --ref develop            # a branch
+python install.py --ref 00949e695e16       # an exact commit
+```
 
 Either way, nothing is installed on your machine and there is no pip step. Plain Python is enough.
 
