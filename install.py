@@ -5,7 +5,7 @@ Install a NimaLTD library into your STM32 project.
 Run it from the root of your project. It works two ways, depending on whether
 this file has a library sitting next to it.
 
-    python install.py
+    python fsm/install.py
         You downloaded this repository into your project, so the library is
         already here. Nothing is asked. The repository folder becomes a plain
         library folder: the header and source move to the top, your config file
@@ -17,9 +17,8 @@ this file has a library sitting next to it.
         which would break your build.
 
     python install.py fsm
-        This file is on its own, so the library is fetched from GitHub. You are
-        asked which folder to put it in. Only the files the library actually
-        needs are downloaded.
+        This copy is not tied to any library, so it takes the name. The copy in
+        a library's own repository knows its name already and needs no argument.
 
 Your own <library>_config.h is never overwritten, so either form is also how you
 update.
@@ -38,6 +37,11 @@ import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
+
+# Which library this copy installs when it is downloaded on its own, away from
+# the repository. Set per repository. The copy in stm32-installer leaves it None,
+# because that one is not tied to any particular library.
+LIBRARY = None
 
 MODULE = "stm32_installer"
 SOURCE = "https://github.com/nimaltd/stm32-installer/archive/refs/heads/main.zip"
@@ -129,12 +133,17 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     beside_a_library = (HERE / MANIFEST).is_file()
 
+    # Downloaded on its own, with no name given. This copy knows which library
+    # it came from, which is what makes the one line command work.
+    if not beside_a_library and not argv and LIBRARY:
+        argv = [LIBRARY]
+
     if not beside_a_library and not argv:
         print(
             f"There is no {MANIFEST} next to this file, so there is no library here "
             "to install.\n"
             "Say which one you want, for example:\n\n"
-            f"    {Path(sys.executable).name} {Path(__file__).name} fsm\n",
+            f"    python {Path(__file__).name} fsm\n",
             file=sys.stderr,
         )
         return 2

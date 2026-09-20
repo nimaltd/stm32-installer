@@ -22,18 +22,29 @@ The repository folder becomes the library folder: the header and source move to 
 
 **You have not downloaded anything:**
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/nimaltd/stm32-installer/main/install.py -o install.py
-python install.py fsm
+Take `install.py` from the library you want. It knows which library it belongs to, so there is nothing else to say.
+
+**Windows, Command Prompt:**
+
+```bat
+curl -fsSL https://raw.githubusercontent.com/nimaltd/fsm/master/install.py -o install.py && python install.py
 ```
 
-On Windows PowerShell, replace the first line with:
+**Windows, PowerShell:**
 
 ```powershell
-irm https://raw.githubusercontent.com/nimaltd/stm32-installer/main/install.py -OutFile install.py
+irm https://raw.githubusercontent.com/nimaltd/fsm/master/install.py -OutFile install.py; python install.py
 ```
 
-You are asked which folder to use. Only the files the library actually needs are downloaded, not the whole repository. The same `install.py` installs any library, so `python install.py spif` works too.
+PowerShell needs `irm` rather than `curl`, because `curl` there is an alias for a different command that does not understand those options.
+
+**Linux and macOS:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nimaltd/fsm/master/install.py -o install.py && python3 install.py
+```
+
+You are asked which folder to use. Only the files the library actually needs are downloaded, not the whole repository. To install a different library with the same file, pass its name: `python install.py spif`.
 
 Either way, nothing is installed on your machine and there is no pip step. Plain Python is enough.
 
