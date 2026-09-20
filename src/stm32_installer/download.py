@@ -8,15 +8,17 @@ carries a vendored test framework, that is the difference between a few hundred
 kilobytes and a few.
 """
 
+import json
 import shutil
 import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-from . import yamlreader
+from . import manifest, yamlreader
 
 RAW_URL = "https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}"
+TREE_URL = "https://api.github.com/repos/{owner}/{repo}/git/trees/{ref}?recursive=1"
 DEFAULT_OWNER = "nimaltd"
 TIMEOUT_SECONDS = 30
 
@@ -40,26 +42,52 @@ def _fetch(owner, repo, ref, path):
         raise DownloadError(f"Could not reach GitHub: {error.reason}.") from error
 
 
-def _listed_paths(data):
+def _listed_entries(data):
     """
-    Every repository path a parsed manifest refers to.
+    Every repository path or pattern a parsed manifest refers to.
 
-    A files entry is either a plain path or a {from, to} pair, and only the
-    "from" side names something to download.
+    A files entry is either a plain path, a folder, a wildcard, or a
+    {from, to} pair, and only the "from" side names something to download.
     """
     files = data.get("files") or {}
     listed = list(files.get("headers") or []) + list(files.get("sources") or [])
-    listed += data.get("config") or []
+    listed += data.get("once") or []
+    listed += data.get("extras") or ["LICENSE.md", "NOTICE"]
 
-    paths = []
+    entries = []
     for item in listed:
         if isinstance(item, dict):
             if "from" in item:
-                paths.append(item["from"])
+                entries.append(str(item["from"]))
         else:
-            paths.append(item)
+            entries.append(str(item))
 
-    return paths
+    return entries
+
+
+def tree(owner, repo, ref):
+    """
+    Every file path in the repository, from the GitHub API.
+
+    Needed because a folder or a wildcard cannot be resolved against
+    raw.githubusercontent, which only serves one named file at a time. Returns
+    None when the listing is unavailable, so the caller can fall back to
+    treating each entry as a literal path.
+    """
+    url = TREE_URL.format(owner=owner, repo=repo, ref=ref)
+
+    try:
+        with urllib.request.urlopen(url, timeout=TIMEOUT_SECONDS) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+
+    if data.get("truncated"):
+        # Enormous repository. Literal paths still work, patterns would quietly
+        # miss files, so it is better to admit to knowing nothing.
+        return None
+
+    return [item["path"] for item in data.get("tree", []) if item.get("type") == "blob"]
 
 
 def fetch(source, ref="master", destination=None):
@@ -93,17 +121,43 @@ def fetch(source, ref="master", destination=None):
     if not isinstance(data, dict):
         raise DownloadError(f"{owner}/{repo} has a library.yml that is not a mapping.")
 
-    for path in _listed_paths(data):
-        target = root / path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(_fetch(owner, repo, ref, path))
+    entries = _listed_entries(data)
+    optional = {str(item) for item in (data.get("extras") or ["LICENSE.md", "NOTICE"])}
 
-    # Optional, so a repository missing one is not an error.
-    for path in data.get("extras") or ["LICENSE.md", "NOTICE"]:
-        try:
-            (root / path).write_bytes(_fetch(owner, repo, ref, path))
-        except DownloadError:
+    # One listing of the repository, and only when something actually needs it.
+    known = tree(owner, repo, ref) if any(manifest.is_pattern(e) for e in entries) else None
+
+    wanted = []
+    for entry in entries:
+        if known is None:
+            wanted.append((entry, entry))
             continue
+
+        for path in manifest.expand(None, entry, known):
+            wanted.append((path.as_posix(), entry))
+
+    for path, entry in wanted:
+        try:
+            target = root / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(_fetch(owner, repo, ref, path))
+        except DownloadError:
+            if entry in optional:
+                # Optional by nature, so a repository missing one is fine.
+                continue
+
+            # A plain path that is not a file may be a folder, which only the
+            # repository listing can resolve.
+            listing = known if known is not None else tree(owner, repo, ref)
+            found = manifest.expand(None, entry, listing) if listing else []
+
+            if not found:
+                raise
+
+            for extra in found:
+                target = root / extra
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(_fetch(owner, repo, ref, extra.as_posix()))
 
     return root
 

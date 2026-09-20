@@ -11,7 +11,7 @@ declares its kind, and declares what it provides, and another library's
 requirement is then satisfied by whatever provides that thing.
 """
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from . import yamlreader
 
@@ -65,15 +65,21 @@ LAYOUTS = (
 )
 
 
-class ConfigFile:
-    """A template copied once, which then belongs to the user."""
+class OnceFile:
+    """
+    A file copied once and then left alone, because it belongs to the user.
+
+    Usually a configuration header, but the rule is about ownership rather than
+    content: a port layer someone fills in, or a table they tune, wants exactly
+    the same treatment.
+    """
 
     def __init__(self, source, destination):
         self.source = source
         self.destination = destination
 
     def __repr__(self):
-        return f"ConfigFile({self.source!r} -> {self.destination!r})"
+        return f"OnceFile({self.source!r} -> {self.destination!r})"
 
 
 class FileEntry:
@@ -96,13 +102,63 @@ class FileEntry:
         return f"FileEntry({self.source.as_posix()!r} -> {self.destination!r})"
 
 
-def _entries(raw, layout):
-    """
-    Read a files: list, where each item is a path or a {from, to} pair.
+def is_pattern(path):
+    """Whether a manifest entry names more than one file."""
+    return any(ch in str(path) for ch in "*?[")
 
-    A plain path takes its destination from the layout. A pair says exactly
+
+def expand(root, entry, known=None):
+    """
+    Turn one manifest entry into the repository paths it names.
+
+    An entry is a file, a folder, or a wildcard. A folder means every file
+    beneath it, and a wildcard is matched the way a shell would. Results come
+    back sorted, so a manifest produces the same install every time.
+
+    Args:
+        root: the repository root, used when matching against a local checkout.
+        entry: the path, folder or pattern written in the manifest.
+        known: every path in the repository, for matching without a checkout.
+            The online install passes this, since it has no files on disk yet.
+
+    Returns:
+        A list of repository relative Paths, empty when nothing matched.
+    """
+    text = Path(entry).as_posix()
+
+    if known is not None:
+        if is_pattern(text):
+            return sorted(Path(p) for p in known if PurePosixPath(p).match(text))
+
+        if text in known:
+            return [Path(text)]
+
+        prefix = text.rstrip("/") + "/"
+
+        return sorted(Path(p) for p in known if p.startswith(prefix))
+
+    if is_pattern(text):
+        return sorted(p.relative_to(root) for p in root.glob(text) if p.is_file())
+
+    target = root / text
+
+    if target.is_file():
+        return [Path(text)]
+
+    if target.is_dir():
+        return sorted(p.relative_to(root) for p in target.rglob("*") if p.is_file())
+
+    return []
+
+
+def _entries(root, raw, layout, known=None):
+    """
+    Read a files: list, where each item is a path, a folder, a wildcard, or a
+    {from, to} pair.
+
+    A plain entry takes its destination from the layout. A pair says exactly
     where the file goes, which is the escape hatch for a library that does not
-    fit either layout.
+    fit either layout, and so it can only name one file.
     """
     result = []
 
@@ -110,19 +166,52 @@ def _entries(raw, layout):
         if isinstance(item, dict):
             if "from" not in item:
                 raise ManifestError(f"a files entry is missing 'from': {item!r}")
-            source = Path(item["from"])
-            destination = item.get("to") or _placed(source, layout)
-        else:
-            source = Path(item)
-            destination = _placed(source, layout)
 
-        result.append(FileEntry(source, destination))
+            source = Path(item["from"])
+            destination = item.get("to")
+
+            if destination and is_pattern(source):
+                raise ManifestError(
+                    f"'{source.as_posix()}' matches many files, so it cannot have a "
+                    f"single 'to' of '{destination}'. Drop the 'to' and let the layout "
+                    f"place them, or list the files one by one."
+                )
+
+            if destination:
+                result.append(FileEntry(source, destination))
+                continue
+
+            raw_entry = source
+        else:
+            raw_entry = Path(item)
+
+        found = expand(root, raw_entry, known)
+
+        if not found:
+            # Kept so load() can refuse it by name rather than silently
+            # installing nothing, which is what a wrong pattern feels like.
+            result.append(FileEntry(raw_entry, _placed(raw_entry, layout)))
+            continue
+
+        for path in found:
+            result.append(FileEntry(path, _placed(path, layout, raw_entry)))
 
     return result
 
 
-def _placed(source, layout):
-    """Where a file lands when the manifest does not say."""
+def _placed(source, layout, entry=None):
+    """
+    Where a file lands when the manifest does not say.
+
+    A folder keeps its shape whatever the layout, because "copy this folder"
+    only means one thing, and flattening it would collide the moment two
+    subfolders held the same file name.
+    """
+    if entry is not None and not is_pattern(entry):
+        prefix = Path(entry).as_posix().rstrip("/") + "/"
+        if source.as_posix().startswith(prefix):
+            return source.as_posix()
+
     if layout == "mirror":
         return source.as_posix()
 
@@ -173,7 +262,7 @@ class Requirements:
 class Manifest:
     """What a library.yml says about one library."""
 
-    def __init__(self, root, data):
+    def __init__(self, root, data, known=None):
         self.root = Path(root)
         self.name = data["name"]
         self.version = str(data.get("version", "0.0.0"))
@@ -196,14 +285,13 @@ class Manifest:
         self.layout = str(install.get("layout", "flat")).lower()
 
         files = data["files"]
-        self.headers = _entries(files.get("headers"), self.layout)
-        self.sources = _entries(files.get("sources"), self.layout)
-        # "to" is optional. Templates live in template/ under their final name,
-        # so the destination is normally just the file name, and saying it twice
-        # would only be one more thing to get out of step.
-        self.config = [
-            ConfigFile(Path(entry["from"]), entry.get("to") or Path(entry["from"]).name)
-            for entry in (data.get("config") or [])
+        self.headers = _entries(self.root, files.get("headers"), self.layout, known)
+        self.sources = _entries(self.root, files.get("sources"), self.layout, known)
+        # "to" is optional. The file normally keeps its own name, and saying
+        # it twice would only be one more thing to get out of step.
+        self.once = [
+            OnceFile(Path(entry["from"]), entry.get("to") or Path(entry["from"]).name)
+            for entry in (data.get("once") or [])
         ]
 
         # Which folders go on the IDE's include path, worked out from where the
@@ -216,7 +304,20 @@ class Manifest:
         )
         # Copied verbatim alongside the code. The Apache licence wants both of
         # these to travel with it, and NOTICE is what carries the attribution.
-        self.extras = [Path(p) for p in (data.get("extras") or ["LICENSE.md", "NOTICE"])]
+        # Extras are optional by nature, so an entry that matches nothing is a
+        # warning rather than a refusal. Silence was the old behaviour and it
+        # made a mistyped pattern look exactly like a working one.
+        self.extras = []
+        self.empty_extras = []
+
+        for item in data.get("extras") or ["LICENSE.md", "NOTICE"]:
+            found = expand(self.root, item, known)
+
+            for path in found:
+                self.extras.append(FileEntry(path, _placed(path, self.layout, item)))
+
+            if not found and item not in ("LICENSE.md", "NOTICE"):
+                self.empty_extras.append(str(item))
 
     @property
     def code_files(self):
@@ -236,7 +337,7 @@ class Manifest:
         names = [entry.destination for entry in self.sources]
         names += [
             entry.destination
-            for entry in self.config
+            for entry in self.once
             if Path(entry.destination).suffix.lower() in (".c", ".cpp", ".cc", ".s")
         ]
 
@@ -245,11 +346,24 @@ class Manifest:
     @property
     def required_files(self):
         """Every repository path the manifest promises. Extras are optional."""
-        return [entry.source for entry in self.code_files] + [e.source for e in self.config]
+        return [entry.source for entry in self.code_files] + [e.source for e in self.once]
 
     def present_extras(self):
-        """Extras that actually exist. A repository without a NOTICE is still valid."""
-        return [p for p in self.extras if (self.root / p).is_file()]
+        """Extras to copy. Already expanded, so every one of these exists."""
+        return list(self.extras)
+
+    def clashes(self):
+        """
+        Files claimed as both code and once.
+
+        Code is overwritten on every install and a once file never is, so one
+        claimed as both would have the user's edits quietly replaced while the
+        output still reported it as kept. A wildcard that happens to sweep up
+        the config header is the usual way this happens.
+        """
+        code = {entry.source.as_posix() for entry in self.code_files}
+
+        return sorted(code & {entry.source.as_posix() for entry in self.once})
 
     def missing_files(self):
         """Files the manifest promises but the repository does not contain."""
@@ -284,6 +398,9 @@ def _warnings(manifest):
     if manifest.layout not in LAYOUTS:
         found.append(f"install.layout '{manifest.layout}' is not one of: {', '.join(LAYOUTS)}")
 
+    for entry in manifest.empty_extras:
+        found.append(f"extras entry '{entry}' matched no file")
+
     return found
 
 
@@ -305,7 +422,7 @@ def _escapes(destination):
     return Path(text).is_absolute() or ".." in Path(text).parts
 
 
-def load(library_root, strict=False):
+def load(library_root, strict=False, known=None):
     """
     Read the library.yml at the root of a library repository.
 
@@ -313,6 +430,8 @@ def load(library_root, strict=False):
         library_root: the folder holding library.yml.
         strict: treat unknown kinds and categories as errors. Useful in the
             library author's own CI, too fussy for a user installing something.
+        known: every path in the repository, when the files are not on disk yet.
+            Folder and wildcard entries are matched against this instead.
 
     Returns:
         A Manifest.
@@ -342,7 +461,7 @@ def load(library_root, strict=False):
     if not isinstance(data["files"], dict):
         raise ManifestError(f"{path}: 'files' should hold 'headers' and 'sources' lists.")
 
-    manifest = Manifest(root, data)
+    manifest = Manifest(root, data, known)
 
     if not manifest.code_files:
         raise ManifestError(f"{path} lists no headers and no sources, so there is nothing to install.")
@@ -357,9 +476,17 @@ def load(library_root, strict=False):
     # the user's own code rather than the folder they agreed to.
     escaping = [
         entry.destination
-        for entry in manifest.code_files + manifest.config
+        for entry in manifest.code_files + manifest.once
         if _escapes(entry.destination)
     ]
+
+    clashing = manifest.clashes()
+    if clashing:
+        raise ManifestError(
+            f"{path} lists these as both code and configuration, so an update would "
+            f"overwrite the user's settings: " + ", ".join(clashing) + ". Narrow the "
+            f"pattern, or list the files one by one."
+        )
 
     if escaping:
         raise ManifestError(

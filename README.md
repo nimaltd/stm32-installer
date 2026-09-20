@@ -13,7 +13,7 @@ Run either of these from the root of your STM32 project.
 **You downloaded the repository into your project already:**
 
 ```bash
-python fsm/install.py
+python sequencer/install.py
 ```
 
 Nothing is asked, and nothing is installed on your machine. The installer is fetched into a temporary folder, used, and deleted, so there is no pip step, no packages, and no stale copy to go out of date. Plain Python is all you need.
@@ -27,13 +27,13 @@ Take `install.py` from the library you want. It knows which library it belongs t
 **Windows, Command Prompt:**
 
 ```bat
-curl -fsSL https://raw.githubusercontent.com/nimaltd/fsm/master/install.py -o install.py && python install.py
+curl -fsSL https://raw.githubusercontent.com/nimaltd/sequencer/master/install.py -o install.py && python install.py
 ```
 
 **Windows, PowerShell:**
 
 ```powershell
-irm https://raw.githubusercontent.com/nimaltd/fsm/master/install.py -OutFile install.py; python install.py
+irm https://raw.githubusercontent.com/nimaltd/sequencer/master/install.py -OutFile install.py; python install.py
 ```
 
 PowerShell needs `irm` rather than `curl`, because `curl` there is an alias for a different command that does not understand those options.
@@ -41,7 +41,7 @@ PowerShell needs `irm` rather than `curl`, because `curl` there is an alias for 
 **Linux and macOS:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nimaltd/fsm/master/install.py -o install.py && python3 install.py
+curl -fsSL https://raw.githubusercontent.com/nimaltd/sequencer/master/install.py -o install.py && python3 install.py
 ```
 
 You are asked which folder to use. Only the files the library actually needs are downloaded, not the whole repository. Afterwards `install.py` deletes itself, so nothing is left lying in your project.
@@ -62,7 +62,7 @@ If you would rather have the command on your PATH, pip can still do it:
 
 ```bash
 pip install https://github.com/nimaltd/stm32-installer/archive/refs/heads/main.zip
-stm32-install fsm
+stm32-install sequencer
 ```
 
 Either way it then registers the library with your IDE, and prints what it needs from your CubeMX setup.
@@ -80,20 +80,20 @@ Either way it then registers the library with your IDE, and prints what it needs
 | Keil MDK 5 and 6 | A file group and the include path in `.uvprojx` |
 | IAR EWARM | A file group and the include path in `.ewp` |
 
-**Never overwrites your configuration.** `fsm_config.h` is created once. Reinstall as often as you like: the code is replaced, your settings are not.
+**Never overwrites your configuration.** `seq_config.h` is created once. Reinstall as often as you like: the code is replaced, your settings are not.
 
 **Keeps your CMakeLists.txt short.** Your project gets two lines that never change, and the library's file list lives with the library:
 
 ```cmake
-# >>> stm32-installer: fsm >>>
-add_subdirectory(fsm)
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE fsm_lib)
-# <<< stm32-installer: fsm <<<
+# >>> stm32-installer: sequencer >>>
+add_subdirectory(sequencer)
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE sequencer_lib)
+# <<< stm32-installer: sequencer <<<
 ```
 
-The target is called `fsm_lib` rather than `fsm`, because a project is often named after the library being tried out in it and CMake allows only one target per name. The `PRIVATE` keyword is dropped when your project links its libraries without one, since CMake refuses to mix the two forms.
+The target is called `sequencer_lib` rather than `sequencer`, because a project is often named after the library being tried out in it and CMake allows only one target per name. The `PRIVATE` keyword is dropped when your project links its libraries without one, since CMake refuses to mix the two forms.
 
-The generated `fsm/CMakeLists.txt` declares an INTERFACE target, not a STATIC one. That matters: an INTERFACE target hands its sources to whoever links it, so they are compiled as part of your application and inherit its defines and include paths. That is what lets a driver's `.c` file find `main.h` and the HAL headers. A STATIC library would not see them and would fail to compile.
+The generated `sequencer/CMakeLists.txt` declares an INTERFACE target, not a STATIC one. That matters: an INTERFACE target hands its sources to whoever links it, so they are compiled as part of your application and inherit its defines and include paths. That is what lets a driver's `.c` file find `main.h` and the HAL headers. A STATIC library would not see them and would fail to compile.
 
 **Backs up before editing.** Every project file is copied to a timestamped `.bak` first. If the file is not one it recognises, it changes nothing and prints what to click instead.
 
@@ -119,10 +119,10 @@ It cannot switch a peripheral on for you. The `.ioc` belongs to CubeMX, and edit
 Put a `library.yml` at the root of the repository.
 
 ```yaml
-name: fsm
+name: sequencer
 version: 2.0.0
-description: Finite state machine and task queue for STM32
-repository: https://github.com/nimaltd/fsm
+description: Non blocking state sequencer and interrupt task queue for STM32
+repository: https://github.com/nimaltd/sequencer
 license: Apache-2.0
 
 kind: middleware        # driver, middleware, rtos, protocol, filesystem, utility, bsp
@@ -151,23 +151,30 @@ install:
 
 files:
   headers:
-    - src/fsm.h
+    - src/seq.h
+    - src/port/*.h            # a wildcard, matched the way a shell would
   sources:
-    - src/fsm.c
+    - src/seq.c
     - from: src/port/spi.c    # a file can say exactly where it goes, which
       to: port/spi.c          # overrides the layout for that one file
 
-config:                 # copied once, then it belongs to the user
-  - from: src/fsm_config.h
-  - from: src/fsm_port.c  # a .c template works the same way
+once:                   # copied once, then it belongs to the user
+  - from: src/seq_config.h
+  - from: src/seq_port.c  # a .c starter works the same way
     to: my_port.c         # "to" only when the name should change
 
-extras: [LICENSE.md, NOTICE]   # this is the default, so it can be left out
+extras:                 # copied as they are, no compiling
+  - LICENSE.md          # LICENSE.md and NOTICE are the default, so this
+  - NOTICE              # section can be left out entirely
+  - README.md
+  - docs                # a folder, copied whole and keeping its shape
 ```
 
-A file listed under `config` is copied only when it is missing, so the user's own edits survive every update. It keeps its own name unless you give it a `to`.
+A file listed under `once` is copied only when it is missing, so the user's own edits survive every update. It keeps its own name unless you give it a `to`.
 
-One catch worth knowing: `#include "x.h"` searches the including file's own folder before any include path, so a config sitting beside the header that includes it will always win. That is fine when the library's tests use the same config, and it is why the tests here are written against `FSM_MAX_TASKS` rather than a fixed number.
+The key says what happens rather than what the file is. It is usually a configuration header, but the same rule fits a port layer someone fills in, or a table they tune: anything that is the library's to start and theirs from then on.
+
+One catch worth knowing: `#include "x.h"` searches the including file's own folder before any include path, so a config sitting beside the header that includes it will always win. That is fine when the library's tests use the same config, and it is why the tests in these libraries are written against `SEQ_MAX_TASKS` rather than a fixed number.
 
 The include path follows the layout on its own: `flat` gives the library folder, `mirror` gives wherever the headers landed. Add `install.include_dirs` only when that guess is wrong.
 
@@ -182,7 +189,7 @@ Three things about this that are easy to get wrong:
 Then copy `install.py` in from this repository and set the three constants near the top:
 
 ```python
-LIBRARY = "nimaltd/fsm"     # owner/name, so a fork under another account works
+LIBRARY = "nimaltd/sequencer"  # owner/name, so a fork under another account works
 BRANCH  = "master"          # the branch that library lives on
 
 # Where the installer itself comes from.

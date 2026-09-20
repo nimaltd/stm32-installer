@@ -14,7 +14,7 @@ def test_code_and_config_land_in_the_folder(library, tmp_path):
     assert (destination / "demo.h").is_file()
     assert (destination / "demo.c").is_file()
     assert (destination / "demo_config.h").is_file()
-    assert len(result.config_created) == 1
+    assert len(result.created) == 1
 
 
 def test_files_land_flat_not_in_inc_and_src(library, tmp_path):
@@ -39,8 +39,8 @@ def test_an_existing_config_is_never_overwritten(library, tmp_path):
     result = installer.install_to(lib, destination)
 
     assert (destination / "demo_config.h").read_text(encoding="utf-8") == "#define DEMO_SIZE 64\n"
-    assert result.config_kept
-    assert not result.config_created
+    assert result.kept
+    assert not result.created
     assert result.was_update
 
 
@@ -162,7 +162,7 @@ def test_mirror_layout_survives_the_cleanup(library, tmp_path):
         root=root,
         headers=["inc/big.h", "inc/port/spi.h"],
         sources=["src/big.c", "src/port/spi.c"],
-        config=[{"from": "template/big_config.h"}],
+        once=[{"from": "template/big_config.h"}],
         extra_files={"template/big_config.h": "#define N 1\n", "test/test_big.c": "int main(void){}\n"},
         install={"layout": "mirror"},
     )

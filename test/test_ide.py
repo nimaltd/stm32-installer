@@ -147,7 +147,7 @@ def test_a_c_template_reaches_every_build(library, project):
         library,
         root,
         extra_files={"template/demo_port.c": "/* port */\n"},
-        config=[
+        once=[
             {"from": "template/demo_config.h"},
             {"from": "template/demo_port.c"},
         ],

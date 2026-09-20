@@ -16,27 +16,27 @@ def test_reads_the_basics(library):
     assert [e.destination for e in found.sources] == ["demo.c"]
 
 
-def test_a_template_keeps_its_own_name_when_no_destination_is_given(library):
-    """Templates sit in template/ under their final name, so "to" is redundant."""
+def test_a_once_file_keeps_its_own_name_when_no_destination_is_given(library):
+    """A once file normally lands under its own name, so "to" is redundant."""
     found = manifest.load(library())
 
-    assert found.config[0].source == Path("template/demo_config.h")
-    assert found.config[0].destination == "demo_config.h"
+    assert found.once[0].source == Path("template/demo_config.h")
+    assert found.once[0].destination == "demo_config.h"
 
 
 def test_an_explicit_destination_still_wins(library):
-    root = library(config=[{"from": "template/demo_config.h", "to": "renamed.h"}])
+    root = library(once=[{"from": "template/demo_config.h", "to": "renamed.h"}])
 
     found = manifest.load(root)
 
-    assert found.config[0].destination == "renamed.h"
+    assert found.once[0].destination == "renamed.h"
 
 
 def test_c_template_counts_as_a_source_to_compile(library):
     """A port layer shipped as a template still has to reach the build."""
     root = library(
         extra_files={"template/demo_port.c": "/* port */\n"},
-        config=[
+        once=[
             {"from": "template/demo_config.h"},
             {"from": "template/demo_port.c"},
         ],
@@ -169,3 +169,88 @@ def test_an_absolute_destination_is_refused(library):
 
     with pytest.raises(manifest.ManifestError, match="outside the install folder"):
         manifest.load(root)
+
+
+def test_a_wildcard_expands_to_every_match(library):
+    root = library(
+        headers=["src/*.h"],
+        sources=["src/*.c"],
+        extra_files={
+            "src/a.h": "/* a */\n", "src/b.h": "/* b */\n",
+            "src/a.c": "/* a */\n", "src/b.c": "/* b */\n",
+        },
+        once=[{"from": "template/demo_config.h"}],
+    )
+
+    found = manifest.load(root)
+
+    assert [e.destination for e in found.headers] == ["a.h", "b.h"]
+    assert found.build_sources == ["a.c", "b.c"]
+
+
+def test_a_folder_expands_and_keeps_its_shape(library):
+    """Flattening a folder would collide the moment two subfolders agreed on a name."""
+    root = library(
+        extra_files={"docs/guide.md": "g\n", "docs/api/ref.md": "r\n"},
+    )
+
+    import yaml
+
+    data = yaml.safe_load((root / "library.yml").read_text(encoding="utf-8"))
+    data["extras"] = ["docs"]
+    (root / "library.yml").write_text(yaml.safe_dump(data), encoding="utf-8")
+
+    found = manifest.load(root)
+
+    assert sorted(e.destination for e in found.extras) == ["docs/api/ref.md", "docs/guide.md"]
+
+
+def test_a_required_pattern_matching_nothing_is_refused(library):
+    with pytest.raises(manifest.ManifestError, match="do not exist"):
+        manifest.load(library(sources=["src/*.cpp"]))
+
+
+def test_an_extras_pattern_matching_nothing_only_warns(library):
+    import yaml
+
+    root = library()
+    data = yaml.safe_load((root / "library.yml").read_text(encoding="utf-8"))
+    data["extras"] = ["docs/*.md"]
+    (root / "library.yml").write_text(yaml.safe_dump(data), encoding="utf-8")
+
+    found = manifest.load(root)
+
+    assert any("matched no file" in w for w in found.warnings)
+
+
+def test_a_file_claimed_as_both_code_and_once_is_refused(library):
+    """
+    A wildcard sweeping up the config header would have the user's settings
+    overwritten on every update, while the output still said they were kept.
+    """
+    root = library(
+        headers=["src/*.h"],
+        extra_files={"src/demo.h": "/* h */\n", "src/demo_config.h": "#define X 1\n"},
+        once=[{"from": "src/demo_config.h"}],
+    )
+
+    with pytest.raises(manifest.ManifestError, match="both code and configuration"):
+        manifest.load(root)
+
+
+def test_a_wildcard_cannot_be_given_one_destination(library):
+    with pytest.raises(manifest.ManifestError, match="matches many files"):
+        manifest.load(library(sources=[{"from": "src/*.c", "to": "one.c"}]))
+
+
+def test_expand_matches_against_a_listing_when_there_are_no_files(library):
+    """This is the path the online install takes, with no checkout to look at."""
+    known = ["src/a.h", "src/b.h", "src/a.c", "docs/guide.md", "docs/api/ref.md"]
+
+    assert [p.as_posix() for p in manifest.expand(None, "src/*.h", known)] == ["src/a.h", "src/b.h"]
+    assert [p.as_posix() for p in manifest.expand(None, "docs", known)] == [
+        "docs/api/ref.md",
+        "docs/guide.md",
+    ]
+    assert [p.as_posix() for p in manifest.expand(None, "src/a.c", known)] == ["src/a.c"]
+    assert manifest.expand(None, "nothing/*.x", known) == []

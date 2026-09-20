@@ -27,7 +27,7 @@ def library(tmp_path):
         kind="driver",
         headers=("inc/demo.h",),
         sources=("src/demo.c",),
-        config=None,
+        once=None,
         requires=None,
         install=None,
         extra_files=None,
@@ -36,20 +36,23 @@ def library(tmp_path):
         root = Path(root) if root else tmp_path / name
         root.mkdir(parents=True, exist_ok=True)
 
-        if config is None:
-            config = [{"from": "template/demo_config.h"}]
+        if once is None:
+            once = [{"from": "template/demo_config.h"}]
 
         written = {
             "template/demo_config.h": "#define DEMO_SIZE 8\n",
             "NOTICE": f"{name}\nCopyright 2026 Nima Askari (NimaLTD)\n",
         }
-        # A files entry is either a plain path or a {from, to} pair, and only
-        # the "from" side is a file that has to exist in the repository.
+        # A files entry is either a plain path, a wildcard, or a {from, to}
+        # pair. Only the "from" side is a file, and a wildcard names no file of
+        # its own, so a test using one supplies the real files in extra_files.
         def source_of(item):
-            return item["from"] if isinstance(item, dict) else item
+            name = item["from"] if isinstance(item, dict) else item
 
-        written.update({source_of(h): "/* header */\n" for h in headers})
-        written.update({source_of(s): "/* source */\n" for s in sources})
+            return None if any(ch in str(name) for ch in "*?[") else name
+
+        written.update({source_of(h): "/* header */\n" for h in headers if source_of(h)})
+        written.update({source_of(s): "/* source */\n" for s in sources if source_of(s)})
         written.update(extra_files or {})
 
         for relative, text in written.items():
@@ -64,8 +67,8 @@ def library(tmp_path):
             "files": {"headers": list(headers), "sources": list(sources)},
         }
 
-        if config:
-            data["config"] = config
+        if once:
+            data["once"] = once
 
         if requires:
             data["requires"] = requires

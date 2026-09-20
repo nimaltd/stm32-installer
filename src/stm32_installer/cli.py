@@ -80,10 +80,10 @@ def _print_files(result, root):
     for path in result.installed:
         print(console.item("written", "", _show(path, root), console.GREEN))
 
-    for path in result.config_created:
+    for path in result.created:
         print(console.item("created", "yours to edit", _show(path, root), console.CYAN))
 
-    for path in result.config_kept:
+    for path in result.kept:
         print(console.item("kept", "not overwritten", _show(path, root), console.YELLOW))
 
     if result.removed:

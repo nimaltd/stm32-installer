@@ -4,8 +4,9 @@ Copying a library into a user's STM32 project.
 Two rules shape everything here.
 
 Code files are replaced on every install, so an update actually updates.
-Configuration files are copied once and then belong to the user, so an update
-never throws away their settings.
+Files listed under once are copied once and then belong to the user, so an
+update never throws away what they changed. That is usually a configuration
+header, but the rule is about ownership, not about what the file holds.
 """
 
 import json
@@ -59,14 +60,14 @@ class Result:
         self.version = version
         self.destination = Path(destination)
         self.installed = []
-        self.config_created = []
-        self.config_kept = []
+        self.created = []
+        self.kept = []
         self.removed = []
 
     @property
     def was_update(self):
-        """True when a configuration file was already there and was left alone."""
-        return bool(self.config_kept)
+        """True when a kept file was already there and was left alone."""
+        return bool(self.kept)
 
 
 def install_to(library, destination, project_root=None):
@@ -109,21 +110,23 @@ def install_to(library, destination, project_root=None):
 
         result.installed.append(target)
 
-    # Config belongs to the user from the moment it first lands.
-    for entry in library.config:
+    # A kept file belongs to the user from the moment it first lands.
+    for entry in library.once:
         target = destination / entry.destination
         target.parent.mkdir(parents=True, exist_ok=True)
 
         if target.exists():
-            result.config_kept.append(target)
+            result.kept.append(target)
         else:
             shutil.copyfile(library.root / entry.source, target)
-            result.config_created.append(target)
+            result.created.append(target)
 
-    # The licence and the NOTICE ride along, because the licence says they must.
-    for relative in library.present_extras():
-        source = library.root / relative
-        target = destination / relative.name
+    # The licence and the NOTICE ride along, because the licence says they must,
+    # and anything else the manifest lists comes with them.
+    for entry in library.present_extras():
+        source = library.root / entry.source
+        target = destination / entry.destination
+        target.parent.mkdir(parents=True, exist_ok=True)
 
         if source.resolve() != target.resolve():
             shutil.copyfile(source, target)
@@ -172,7 +175,7 @@ def _remove_scaffolding(library, result):
     """
     keep = set()
 
-    for path in result.installed + result.config_created + result.config_kept:
+    for path in result.installed + result.created + result.kept:
         try:
             landed = path.relative_to(library.root)
         except ValueError:
@@ -254,9 +257,7 @@ def _record(project_root, library, result):
         "repository": library.repository,
         "folder": _relative(result.destination, project_root),
         "files": sorted(_relative(p, project_root) for p in result.installed),
-        "config": sorted(
-            _relative(p, project_root) for p in result.config_created + result.config_kept
-        ),
+        "once": sorted(_relative(p, project_root) for p in result.created + result.kept),
         "installed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 

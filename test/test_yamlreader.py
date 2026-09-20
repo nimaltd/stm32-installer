@@ -43,8 +43,8 @@ files:
   sources:
     - src/fsm.c
 
-config:
-  - from: template/fsm_config.h
+once:
+  - from: src/seq_config.h
 """
 
 COMPLICATED = """\
@@ -67,9 +67,9 @@ files:
     - inc/spif_port.h
   sources:
     - src/spif.c
-config:
-  - from: template/spif_config.h
-  - from: template/spif_port.c
+once:
+  - from: src/spif_config.h
+  - from: src/spif_port.c
     to: my_port.c
 extras: [LICENSE.md, NOTICE]
 """
