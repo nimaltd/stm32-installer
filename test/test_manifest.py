@@ -12,8 +12,8 @@ def test_reads_the_basics(library):
 
     assert found.name == "demo"
     assert found.version == "1.0.0"
-    assert [p.name for p in found.headers] == ["demo.h"]
-    assert [p.name for p in found.sources] == ["demo.c"]
+    assert [e.destination for e in found.headers] == ["demo.h"]
+    assert [e.destination for e in found.sources] == ["demo.c"]
 
 
 def test_a_template_keeps_its_own_name_when_no_destination_is_given(library):
@@ -116,3 +116,56 @@ def test_named_rtos_counts_as_needing_one(library):
     found = manifest.load(library(requires={"rtos": "freertos"}))
 
     assert found.requires.needs_rtos
+
+
+def test_flat_layout_puts_everything_at_the_top(library):
+    found = manifest.load(library())
+
+    assert found.layout == "flat"
+    assert [e.destination for e in found.headers] == ["demo.h"]
+    assert found.include_dirs == ["."]
+
+
+def test_mirror_layout_keeps_the_repository_folders(library):
+    root = library(install={"layout": "mirror"})
+
+    found = manifest.load(root)
+
+    assert [e.destination for e in found.headers] == ["inc/demo.h"]
+    assert [e.destination for e in found.sources] == ["src/demo.c"]
+    assert found.include_dirs == ["inc"]
+
+
+def test_a_file_can_name_its_own_destination(library):
+    root = library(
+        headers=[{"from": "inc/demo.h", "to": "api/demo.h"}],
+        extra_files={"inc/demo.h": "/* h */\n"},
+    )
+
+    found = manifest.load(root)
+
+    assert [e.destination for e in found.headers] == ["api/demo.h"]
+    assert found.include_dirs == ["api"]
+
+
+def test_include_dirs_can_be_stated_outright(library):
+    root = library(install={"layout": "mirror", "include_dirs": ["inc", "inc/port"]})
+
+    found = manifest.load(root)
+
+    assert found.include_dirs == ["inc", "inc/port"]
+
+
+def test_a_destination_escaping_the_folder_is_refused(library):
+    """A manifest arrives over the network, so this can never be a warning."""
+    root = library(headers=[{"from": "inc/demo.h", "to": "../../Core/Src/main.c"}])
+
+    with pytest.raises(manifest.ManifestError, match="outside the install folder"):
+        manifest.load(root)
+
+
+def test_an_absolute_destination_is_refused(library):
+    root = library(headers=[{"from": "inc/demo.h", "to": "/etc/passwd"}])
+
+    with pytest.raises(manifest.ManifestError, match="outside the install folder"):
+        manifest.load(root)

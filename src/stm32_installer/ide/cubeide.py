@@ -13,7 +13,7 @@ and a .cproject missing that line is a project that will not open.
 import re
 from pathlib import Path
 
-from .base import ALREADY, CHANGED, MANUAL, Outcome, backup, relative
+from .base import ALREADY, CHANGED, MANUAL, Outcome, backup, include_folders, relative
 
 NAME = "STM32CubeIDE"
 
@@ -42,8 +42,7 @@ def integrate(cproject, library, destination, project_root):
 
     # Include paths in .cproject are relative to the build folder, not the
     # project root, which is why CubeIDE's own entries read ../Core/Inc.
-    value = f"../{folder}"
-    entry = f'<listOptionValue builtIn="false" value="{value}"/>'
+    wanted = [f"../{d}" for d in include_folders(library, folder)]
 
     try:
         text = path.read_text(encoding="utf-8")
@@ -60,16 +59,20 @@ def integrate(cproject, library, destination, project_root):
             _manual_steps(folder),
         )
 
-    if f'value="{value}"' in text:
+    missing = [value for value in wanted if f'value="{value}"' not in text]
+
+    if not missing:
         return Outcome(NAME, ALREADY, f"{folder} is already on the include path.")
 
     saved = backup(path)
+
+    added = "\n".join(f'<listOptionValue builtIn="false" value="{value}"/>' for value in missing)
 
     # Walk backwards, so each insertion does not move the offsets of the next.
     updated = text
     for match in reversed(matches):
         at = match.end()
-        updated = updated[:at] + "\n" + entry + updated[at:]
+        updated = updated[:at] + "\n" + added + updated[at:]
 
     try:
         path.write_text(updated, encoding="utf-8")
@@ -80,7 +83,8 @@ def integrate(cproject, library, destination, project_root):
     return Outcome(
         NAME,
         CHANGED,
-        f"Added {value} to the include paths of {len(matches)} build configuration(s).",
+        f"Added {', '.join(missing)} to the include paths of "
+        f"{len(matches)} build configuration(s).",
         steps=["Refresh the project in CubeIDE (F5) so it picks up the new files."],
         backup=saved,
     )

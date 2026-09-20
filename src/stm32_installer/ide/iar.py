@@ -12,7 +12,7 @@ touch survives byte for byte.
 import re
 from pathlib import Path
 
-from .base import ALREADY, CHANGED, MANUAL, Outcome, backup, relative
+from .base import ALREADY, CHANGED, MANUAL, Outcome, backup, include_folders, relative
 
 NAME = "IAR Embedded Workbench"
 

@@ -5,10 +5,17 @@ from stm32_installer.ide import cmake, cubeide, iar, keil
 
 
 def _install(library_factory, project_root, **kwargs):
-    """A library on disk plus the folder it would be installed into."""
-    lib = manifest.load(library_factory(**kwargs))
+    """
+    A library on disk plus the folder it is installed into.
 
-    return lib, project_root / "demo"
+    The folder is created here because the real flow creates it before any IDE
+    is touched, and the CMake integration writes a file into it.
+    """
+    lib = manifest.load(library_factory(**kwargs))
+    destination = project_root / "demo"
+    destination.mkdir(parents=True, exist_ok=True)
+
+    return lib, destination
 
 
 def test_nothing_is_recognised_in_an_empty_folder(tmp_path):
@@ -23,7 +30,8 @@ def test_a_cubemx_cmake_project_is_both_cmake_and_cubeide(project):
     assert names == {"CMake", "STM32CubeIDE"}
 
 
-def test_cmake_block_lists_sources_and_include_path(library, project):
+def test_cmake_block_points_at_the_library_folder(library, project):
+    """The project file gets two lines, not a list that grows with the library."""
     root = project(cmake=True)
     lib, destination = _install(library, root)
 
@@ -31,8 +39,26 @@ def test_cmake_block_lists_sources_and_include_path(library, project):
     text = (root / "CMakeLists.txt").read_text(encoding="utf-8")
 
     assert outcome.status == ide.CHANGED
-    assert "demo/demo.c" in text
-    assert "target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE demo)" in text
+    assert "add_subdirectory(demo)" in text
+    assert "target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE demo)" in text
+    assert "demo.c" not in text
+
+
+def test_the_library_gets_its_own_cmakelists(library, project):
+    """
+    The target must be INTERFACE. A STATIC one would not inherit the
+    application's defines and include paths, so a driver including main.h would
+    fail to compile. That is the whole reason this file is generated.
+    """
+    root = project(cmake=True)
+    lib, destination = _install(library, root)
+
+    cmake.integrate(root / "CMakeLists.txt", lib, destination, root)
+    text = (destination / "CMakeLists.txt").read_text(encoding="utf-8")
+
+    assert "add_library(demo INTERFACE)" in text
+    assert "add_library(demo STATIC" not in text
+    assert "${CMAKE_CURRENT_SOURCE_DIR}/demo.c" in text
 
 
 def test_cmake_block_is_replaced_not_repeated(library, project):
@@ -131,7 +157,8 @@ def test_a_c_template_reaches_every_build(library, project):
     keil.integrate(root / "MDK" / "Proj.uvprojx", lib, destination, root)
     iar.integrate(root / "EWARM" / "Proj.ewp", lib, destination, root)
 
-    assert "demo/demo_port.c" in (root / "CMakeLists.txt").read_text(encoding="utf-8")
+    # For CMake the file list now lives in the library's own CMakeLists.txt.
+    assert "demo_port.c" in (destination / "CMakeLists.txt").read_text(encoding="utf-8")
     assert "demo_port.c" in (root / "MDK" / "Proj.uvprojx").read_text(encoding="utf-8")
     assert "demo_port.c" in (root / "EWARM" / "Proj.ewp").read_text(encoding="utf-8")
 

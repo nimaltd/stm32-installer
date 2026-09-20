@@ -13,7 +13,7 @@ requirement is then satisfied by whatever provides that thing.
 
 from pathlib import Path
 
-import yaml
+from . import yamlreader
 
 MANIFEST_NAME = "library.yml"
 
@@ -58,6 +58,13 @@ class ManifestError(Exception):
     """A manifest is missing, unreadable, or does not describe a usable library."""
 
 
+# How files are laid out inside the folder they are installed into.
+LAYOUTS = (
+    "flat",    # every file at the top, so one include path covers the library
+    "mirror",  # keep the repository's own folders, for a library too big to flatten
+)
+
+
 class ConfigFile:
     """A template copied once, which then belongs to the user."""
 
@@ -67,6 +74,59 @@ class ConfigFile:
 
     def __repr__(self):
         return f"ConfigFile({self.source!r} -> {self.destination!r})"
+
+
+class FileEntry:
+    """One file, where it lives in the repository and where it lands."""
+
+    def __init__(self, source, destination):
+        self.source = Path(source)
+        # Kept as posix text, because it ends up in CMake, Keil and IAR project
+        # files, and every one of them is happy with forward slashes.
+        self.destination = str(destination).replace("\\", "/")
+
+    @property
+    def folder(self):
+        """The destination's folder, relative to the install folder. "." at the top."""
+        parent = Path(self.destination).parent.as_posix()
+
+        return "." if parent in ("", ".") else parent
+
+    def __repr__(self):
+        return f"FileEntry({self.source.as_posix()!r} -> {self.destination!r})"
+
+
+def _entries(raw, layout):
+    """
+    Read a files: list, where each item is a path or a {from, to} pair.
+
+    A plain path takes its destination from the layout. A pair says exactly
+    where the file goes, which is the escape hatch for a library that does not
+    fit either layout.
+    """
+    result = []
+
+    for item in raw or []:
+        if isinstance(item, dict):
+            if "from" not in item:
+                raise ManifestError(f"a files entry is missing 'from': {item!r}")
+            source = Path(item["from"])
+            destination = item.get("to") or _placed(source, layout)
+        else:
+            source = Path(item)
+            destination = _placed(source, layout)
+
+        result.append(FileEntry(source, destination))
+
+    return result
+
+
+def _placed(source, layout):
+    """Where a file lands when the manifest does not say."""
+    if layout == "mirror":
+        return source.as_posix()
+
+    return source.name
 
 
 class Peripheral:
@@ -132,9 +192,12 @@ class Manifest:
 
         self.requires = Requirements(data.get("requires"))
 
+        install = data.get("install") or {}
+        self.layout = str(install.get("layout", "flat")).lower()
+
         files = data["files"]
-        self.headers = [Path(p) for p in (files.get("headers") or [])]
-        self.sources = [Path(p) for p in (files.get("sources") or [])]
+        self.headers = _entries(files.get("headers"), self.layout)
+        self.sources = _entries(files.get("sources"), self.layout)
         # "to" is optional. Templates live in template/ under their final name,
         # so the destination is normally just the file name, and saying it twice
         # would only be one more thing to get out of step.
@@ -142,6 +205,15 @@ class Manifest:
             ConfigFile(Path(entry["from"]), entry.get("to") or Path(entry["from"]).name)
             for entry in (data.get("config") or [])
         ]
+
+        # Which folders go on the IDE's include path, worked out from where the
+        # headers actually landed unless the manifest says otherwise.
+        declared = install.get("include_dirs")
+        self.include_dirs = (
+            [str(d).replace("\\", "/") for d in declared]
+            if declared
+            else sorted({entry.folder for entry in self.headers}) or ["."]
+        )
         # Copied verbatim alongside the code. The Apache licence wants both of
         # these to travel with it, and NOTICE is what carries the attribution.
         self.extras = [Path(p) for p in (data.get("extras") or ["LICENSE.md", "NOTICE"])]
@@ -161,7 +233,7 @@ class Manifest:
         silent: the file exists, the project looks right, and the link fails
         with undefined references.
         """
-        names = [p.name for p in self.sources]
+        names = [entry.destination for entry in self.sources]
         names += [
             entry.destination
             for entry in self.config
@@ -172,8 +244,8 @@ class Manifest:
 
     @property
     def required_files(self):
-        """Everything the manifest promises. Extras are optional and excluded."""
-        return self.code_files + [entry.source for entry in self.config]
+        """Every repository path the manifest promises. Extras are optional."""
+        return [entry.source for entry in self.code_files] + [e.source for e in self.config]
 
     def present_extras(self):
         """Extras that actually exist. A repository without a NOTICE is still valid."""
@@ -209,7 +281,28 @@ def _warnings(manifest):
     if manifest.requires.rtos not in RTOS_CHOICES:
         found.append(f"requires.rtos '{manifest.requires.rtos}' is not one of: {', '.join(RTOS_CHOICES)}")
 
+    if manifest.layout not in LAYOUTS:
+        found.append(f"install.layout '{manifest.layout}' is not one of: {', '.join(LAYOUTS)}")
+
     return found
+
+
+def _escapes(destination):
+    """
+    Whether a destination would write outside the folder it was given.
+
+    A manifest is downloaded from the internet before any of it is trusted, so a
+    "to" of "../../Core/Src/main.c" has to be caught rather than obeyed.
+    """
+    text = str(destination)
+
+    # A leading slash has to count here. Windows does not call "/etc/passwd"
+    # absolute, because it has no drive letter, but it still resolves to the
+    # root of the current drive rather than to anywhere inside the folder.
+    if text.startswith(("/", "\\")):
+        return True
+
+    return Path(text).is_absolute() or ".." in Path(text).parts
 
 
 def load(library_root, strict=False):
@@ -235,8 +328,8 @@ def load(library_root, strict=False):
         raise ManifestError(f"No {MANIFEST_NAME} in {root}. Is this a NimaLTD library?")
 
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except yaml.YAMLError as error:
+        data = yamlreader.parse(path.read_text(encoding="utf-8"))
+    except yamlreader.YamlError as error:
         raise ManifestError(f"{path} is not valid YAML: {error}") from error
 
     if not isinstance(data, dict):
@@ -258,6 +351,21 @@ def load(library_root, strict=False):
     if missing:
         listed = ", ".join(str(p) for p in missing)
         raise ManifestError(f"{path} lists files that do not exist in the repository: {listed}")
+
+    # Always refused, never merely warned about. A manifest can arrive over the
+    # network, and a destination like "../../Core/Src/main.c" would write into
+    # the user's own code rather than the folder they agreed to.
+    escaping = [
+        entry.destination
+        for entry in manifest.code_files + manifest.config
+        if _escapes(entry.destination)
+    ]
+
+    if escaping:
+        raise ManifestError(
+            f"{path} sends files outside the install folder, which is never allowed: "
+            + ", ".join(escaping)
+        )
 
     problems = _warnings(manifest)
     if problems and strict:

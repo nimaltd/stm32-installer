@@ -16,7 +16,9 @@ Run either of these from the root of your STM32 project.
 python fsm/install.py
 ```
 
-Nothing is asked. The repository folder becomes the library folder: the header and source move to the top, your config file is created, and everything that belongs to the repository rather than your firmware is removed.
+Nothing is asked, and nothing is installed on your machine. The installer is fetched into a temporary folder, used, and deleted, so there is no pip step, no packages, and no stale copy to go out of date. Plain Python is all you need.
+
+The repository folder becomes the library folder: the header and source move to the top, your config file is created, and everything that belongs to the repository rather than your firmware is removed.
 
 **You have not downloaded anything:**
 
@@ -39,12 +41,23 @@ Either way it then registers the library with your IDE, and prints what it needs
 
 | IDE | What gets changed |
 |---|---|
-| CMake | A marked block appended to `CMakeLists.txt` with the sources and include path |
+| CMake | The library gets its own `CMakeLists.txt`, and two lines are appended to yours |
 | STM32CubeIDE | The include path, in every build configuration in `.cproject` |
 | Keil MDK 5 and 6 | A file group and the include path in `.uvprojx` |
 | IAR EWARM | A file group and the include path in `.ewp` |
 
 **Never overwrites your configuration.** `fsm_config.h` is created once. Reinstall as often as you like: the code is replaced, your settings are not.
+
+**Keeps your CMakeLists.txt short.** Your project gets two lines that never change, and the library's file list lives with the library:
+
+```cmake
+# >>> stm32-installer: fsm >>>
+add_subdirectory(fsm)
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE fsm)
+# <<< stm32-installer: fsm <<<
+```
+
+The generated `fsm/CMakeLists.txt` declares an INTERFACE target, not a STATIC one. That matters: an INTERFACE target hands its sources to whoever links it, so they are compiled as part of your application and inherit its defines and include paths. That is what lets a driver's `.c` file find `main.h` and the HAL headers. A STATIC library would not see them and would fail to compile.
 
 **Backs up before editing.** Every project file is copied to a timestamped `.bak` first. If the file is not one it recognises, it changes nothing and prints what to click instead.
 
@@ -94,11 +107,19 @@ requires:
       note: Master mode, 8 bit
   c_standard: c11
 
+install:
+  layout: flat          # flat (default) puts every file at the top of the
+                        # folder, so one include path covers the library.
+                        # mirror keeps inc/ and src/, for a library too big
+                        # to flatten sensibly.
+
 files:
   headers:
     - inc/fsm.h
   sources:
     - src/fsm.c
+    - from: src/port/spi.c    # a file can say exactly where it goes, which
+      to: port/spi.c          # overrides the layout for that one file
 
 config:                 # copied once, then it belongs to the user
   - from: template/fsm_config.h
@@ -109,6 +130,8 @@ extras: [LICENSE.md, NOTICE]   # this is the default, so it can be left out
 ```
 
 Templates live in `template/`, under the name they should end up with. That folder is stripped out after an install, so the copy the user edits is the only one left.
+
+The include path follows the layout on its own: `flat` gives the library folder, `mirror` gives wherever the headers landed. Add `install.include_dirs` only when that guess is wrong.
 
 Three things about this that are easy to get wrong:
 

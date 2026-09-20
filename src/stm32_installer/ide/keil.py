@@ -12,7 +12,7 @@ this byte for byte identical.
 import re
 from pathlib import Path
 
-from .base import ALREADY, CHANGED, MANUAL, Outcome, backup, relative
+from .base import ALREADY, CHANGED, MANUAL, Outcome, backup, include_folders, relative
 
 NAME = "Keil MDK"
 
@@ -96,16 +96,11 @@ def integrate(uvprojx, library, destination, project_root):
     at = GROUPS_OPEN.search(updated).end()
     updated = updated[:at] + "\n" + _group(library.name, folder, library.build_sources) + updated[at:]
 
-    windows_folder = folder.replace("/", "\\")
+    wanted = [d.replace("/", "\\") for d in include_folders(library, folder)]
 
     def add_include(match):
-        existing = match.group(2)
-        parts = [p for p in existing.split(";") if p.strip()]
-
-        if windows_folder in parts:
-            return match.group(0)
-
-        parts.append(windows_folder)
+        parts = [p for p in match.group(2).split(";") if p.strip()]
+        parts += [d for d in wanted if d not in parts]
 
         return match.group(1) + ";".join(parts) + match.group(3)
 

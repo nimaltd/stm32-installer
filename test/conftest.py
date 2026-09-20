@@ -29,6 +29,7 @@ def library(tmp_path):
         sources=("src/demo.c",),
         config=None,
         requires=None,
+        install=None,
         extra_files=None,
         root=None,
     ):
@@ -42,8 +43,13 @@ def library(tmp_path):
             "template/demo_config.h": "#define DEMO_SIZE 8\n",
             "NOTICE": f"{name}\nCopyright 2026 Nima Askari (NimaLTD)\n",
         }
-        written.update({h: f"/* {Path(h).name} */\n" for h in headers})
-        written.update({s: f"/* {Path(s).name} */\n" for s in sources})
+        # A files entry is either a plain path or a {from, to} pair, and only
+        # the "from" side is a file that has to exist in the repository.
+        def source_of(item):
+            return item["from"] if isinstance(item, dict) else item
+
+        written.update({source_of(h): "/* header */\n" for h in headers})
+        written.update({source_of(s): "/* source */\n" for s in sources})
         written.update(extra_files or {})
 
         for relative, text in written.items():
@@ -63,6 +69,9 @@ def library(tmp_path):
 
         if requires:
             data["requires"] = requires
+
+        if install:
+            data["install"] = install
 
         (root / "library.yml").write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 

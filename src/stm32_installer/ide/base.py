@@ -60,6 +60,16 @@ def backup(path):
     return target
 
 
+def include_folders(library, folder):
+    """
+    Every folder of a library that belongs on the include path.
+
+    A flat layout gives just the library folder. A mirror layout, or a manifest
+    that says so, can give several, such as fsm/inc alongside fsm/port.
+    """
+    return [folder if d == "." else f"{folder}/{d}" for d in library.include_dirs]
+
+
 def relative(path, root):
     """
     A forward slash path from root to path, going up where it has to.

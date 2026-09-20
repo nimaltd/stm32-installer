@@ -54,7 +54,7 @@ def test_code_is_replaced_on_a_second_install(library, tmp_path):
 
     installer.install_to(lib, destination)
 
-    assert (destination / "demo.c").read_text(encoding="utf-8") == "/* demo.c */\n"
+    assert (destination / "demo.c").read_text(encoding="utf-8") == "/* source */\n"
 
 
 def test_the_notice_travels_with_the_code(library, tmp_path):
@@ -146,3 +146,48 @@ def test_a_damaged_record_does_not_break_an_install(library, tmp_path):
 
 def test_installed_libraries_is_empty_for_an_untouched_project(tmp_path):
     assert installer.installed_libraries(tmp_path) == {}
+
+
+def test_mirror_layout_survives_the_cleanup(library, tmp_path):
+    """
+    The regression that matters most here.
+
+    A mirror layout leaves files in inc/ and src/, and both of those are on the
+    cleanup list. Matching only on file names installed four files and then
+    deleted every one of them, leaving a generated CMakeLists.txt pointing at
+    nothing.
+    """
+    root = tmp_path / "Proj" / "big"
+    library(
+        root=root,
+        headers=["inc/big.h", "inc/port/spi.h"],
+        sources=["src/big.c", "src/port/spi.c"],
+        config=[{"from": "template/big_config.h"}],
+        extra_files={"template/big_config.h": "#define N 1\n", "test/test_big.c": "int main(void){}\n"},
+        install={"layout": "mirror"},
+    )
+
+    installer.install_in_place(manifest.load(root))
+
+    assert (root / "inc" / "big.h").is_file()
+    assert (root / "inc" / "port" / "spi.h").is_file()
+    assert (root / "src" / "big.c").is_file()
+    assert (root / "src" / "port" / "spi.c").is_file()
+    assert (root / "big_config.h").is_file()
+
+    # The repository scaffolding still has to go, or CubeIDE compiles the tests.
+    assert not (root / "test").exists()
+    assert not (root / "template").exists()
+    assert not (root / "library.yml").exists()
+
+
+def test_mirror_layout_creates_the_subfolders_when_copying_elsewhere(library, tmp_path):
+    root = library(
+        headers=["inc/demo.h"], sources=["src/demo.c"], install={"layout": "mirror"}
+    )
+    destination = tmp_path / "Proj" / "demo"
+
+    installer.install_to(manifest.load(root), destination)
+
+    assert (destination / "inc" / "demo.h").is_file()
+    assert (destination / "src" / "demo.c").is_file()

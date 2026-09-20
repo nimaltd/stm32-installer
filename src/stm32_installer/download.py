@@ -14,7 +14,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-import yaml
+from . import yamlreader
 
 RAW_URL = "https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}"
 DEFAULT_OWNER = "nimaltd"
@@ -41,10 +41,23 @@ def _fetch(owner, repo, ref, path):
 
 
 def _listed_paths(data):
-    """Every repository path a parsed manifest refers to."""
+    """
+    Every repository path a parsed manifest refers to.
+
+    A files entry is either a plain path or a {from, to} pair, and only the
+    "from" side names something to download.
+    """
     files = data.get("files") or {}
-    paths = list(files.get("headers") or []) + list(files.get("sources") or [])
-    paths += [entry["from"] for entry in (data.get("config") or []) if "from" in entry]
+    listed = list(files.get("headers") or []) + list(files.get("sources") or [])
+    listed += data.get("config") or []
+
+    paths = []
+    for item in listed:
+        if isinstance(item, dict):
+            if "from" in item:
+                paths.append(item["from"])
+        else:
+            paths.append(item)
 
     return paths
 
@@ -73,8 +86,8 @@ def fetch(source, ref="master", destination=None):
     (root / "library.yml").write_bytes(raw)
 
     try:
-        data = yaml.safe_load(raw.decode("utf-8"))
-    except (yaml.YAMLError, UnicodeDecodeError) as error:
+        data = yamlreader.parse(raw.decode("utf-8"))
+    except (yamlreader.YamlError, UnicodeDecodeError) as error:
         raise DownloadError(f"{owner}/{repo} has a library.yml that cannot be read: {error}")
 
     if not isinstance(data, dict):

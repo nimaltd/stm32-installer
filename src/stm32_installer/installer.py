@@ -96,9 +96,13 @@ def install_to(library, destination, project_root=None):
     destination.mkdir(parents=True, exist_ok=True)
 
     # Code belongs to the library. Always overwrite, so an update takes effect.
-    for relative in library.code_files:
-        source = library.root / relative
-        target = destination / relative.name
+    for entry in library.code_files:
+        source = library.root / entry.source
+        target = destination / entry.destination
+
+        # A mirror layout, or an explicit "to", can put a file in a subfolder
+        # that does not exist yet.
+        target.parent.mkdir(parents=True, exist_ok=True)
 
         if source.resolve() != target.resolve():
             shutil.copyfile(source, target)
@@ -108,6 +112,7 @@ def install_to(library, destination, project_root=None):
     # Config belongs to the user from the moment it first lands.
     for entry in library.config:
         target = destination / entry.destination
+        target.parent.mkdir(parents=True, exist_ok=True)
 
         if target.exists():
             result.config_kept.append(target)
@@ -157,9 +162,26 @@ def install_in_place(library, cleanup=True):
 
 
 def _remove_scaffolding(library, result):
-    """Delete the repository-only paths, leaving anything the user added."""
-    keep = {p.name for p in result.installed}
-    keep |= {p.name for p in result.config_created + result.config_kept}
+    """
+    Delete the repository-only paths, leaving anything the user added.
+
+    What is kept is worked out from where the files actually landed, not from
+    their names. A mirror layout leaves them in inc/ and src/, and those folders
+    are on the cleanup list, so going by name alone would install four files and
+    then delete all four.
+    """
+    keep = set()
+
+    for path in result.installed + result.config_created + result.config_kept:
+        try:
+            landed = path.relative_to(library.root)
+        except ValueError:
+            continue
+
+        # The top level name under the install folder, which is what the
+        # cleanup list is written in terms of.
+        if landed.parts:
+            keep.add(landed.parts[0])
 
     for name in DEFAULT_CLEANUP:
         target = library.root / name
