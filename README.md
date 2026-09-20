@@ -23,13 +23,26 @@ The repository folder becomes the library folder: the header and source move to 
 **You have not downloaded anything:**
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/nimaltd/stm32-installer/main/install.py -o install.py
+python install.py fsm
+```
+
+On Windows PowerShell, replace the first line with:
+
+```powershell
+irm https://raw.githubusercontent.com/nimaltd/stm32-installer/main/install.py -OutFile install.py
+```
+
+You are asked which folder to use. Only the files the library actually needs are downloaded, not the whole repository. The same `install.py` installs any library, so `python install.py spif` works too.
+
+Either way, nothing is installed on your machine and there is no pip step. Plain Python is enough.
+
+If you would rather have the command on your PATH, pip can still do it:
+
+```bash
 pip install https://github.com/nimaltd/stm32-installer/archive/refs/heads/main.zip
 stm32-install fsm
 ```
-
-You are asked which folder to use. Only the files the library actually needs are downloaded, not the whole repository.
-
-The first line is needed once, not once per library. Run it again whenever you want the newest installer.
 
 Either way it then registers the library with your IDE, and prints what it needs from your CubeMX setup.
 
@@ -141,7 +154,7 @@ Three things about this that are easy to get wrong:
 
 **`LICENSE.md` and `NOTICE` travel with the code.** The Apache licence requires it, and the NOTICE file is what carries your attribution into someone else's product. They are never removed during cleanup.
 
-Then copy `install.py` in from any library that already has it. Nothing in it needs changing: it works out the library from the folder it sits in.
+Then copy `install.py` in from this repository. Nothing in it needs changing: with a `library.yml` beside it, it installs that library, and on its own it takes the library name as an argument instead.
 
 ---
 
