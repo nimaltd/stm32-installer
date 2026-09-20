@@ -40,7 +40,7 @@ def test_cmake_block_points_at_the_library_folder(library, project):
 
     assert outcome.status == ide.CHANGED
     assert "add_subdirectory(demo)" in text
-    assert "target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE demo)" in text
+    assert "target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE demo_lib)" in text
     assert "demo.c" not in text
 
 
@@ -56,8 +56,8 @@ def test_the_library_gets_its_own_cmakelists(library, project):
     cmake.integrate(root / "CMakeLists.txt", lib, destination, root)
     text = (destination / "CMakeLists.txt").read_text(encoding="utf-8")
 
-    assert "add_library(demo INTERFACE)" in text
-    assert "add_library(demo STATIC" not in text
+    assert "add_library(demo_lib INTERFACE)" in text
+    assert "add_library(demo_lib STATIC" not in text
     assert "${CMAKE_CURRENT_SOURCE_DIR}/demo.c" in text
 
 
@@ -191,3 +191,92 @@ def test_only_one_backend_can_be_selected(library, project):
     outcomes = ide.integrate(root, lib, destination, only="cmake")
 
     assert [o.ide for o in outcomes] == ["CMake"]
+
+
+def test_the_library_target_does_not_clash_with_the_project(library, project):
+    """
+    Found in a real CubeMX project called fsm, testing the fsm library.
+
+    CMake allows one target per name, so naming the library target after the
+    library collided with the executable and the configure step failed with
+    "another target with the same name already exists".
+    """
+    root = project(cmake=True)
+    (root / "CMakeLists.txt").write_text(
+        "cmake_minimum_required(VERSION 3.22)\n"
+        "set(CMAKE_PROJECT_NAME demo)\n"
+        "project(${CMAKE_PROJECT_NAME})\n"
+        "add_executable(${CMAKE_PROJECT_NAME})\n",
+        encoding="utf-8",
+    )
+    lib, destination = _install(library, root)
+
+    cmake.integrate(root / "CMakeLists.txt", lib, destination, root)
+
+    assert "add_library(demo_lib INTERFACE)" in (destination / "CMakeLists.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "add_library(demo INTERFACE)" not in (destination / "CMakeLists.txt").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_a_plain_link_signature_is_matched(library, project):
+    """
+    The CubeMX template links without a keyword, and CMake refuses to mix the
+    two forms on one target. Adding PRIVATE broke every CubeMX CMake project
+    with "the plain signature has already been used with the target".
+    """
+    root = project(cmake=True)
+    (root / "CMakeLists.txt").write_text(
+        "cmake_minimum_required(VERSION 3.22)\n"
+        "project(Proj C)\n"
+        "add_executable(${CMAKE_PROJECT_NAME})\n"
+        "target_link_libraries(${CMAKE_PROJECT_NAME}\n    stm32cubemx\n)\n",
+        encoding="utf-8",
+    )
+    lib, destination = _install(library, root)
+
+    cmake.integrate(root / "CMakeLists.txt", lib, destination, root)
+    text = (root / "CMakeLists.txt").read_text(encoding="utf-8")
+
+    assert "target_link_libraries(${CMAKE_PROJECT_NAME} demo_lib)" in text
+    assert "PRIVATE demo_lib" not in text
+
+
+def test_a_keyword_link_signature_is_matched_too(library, project):
+    root = project(cmake=True)
+    (root / "CMakeLists.txt").write_text(
+        "cmake_minimum_required(VERSION 3.22)\n"
+        "project(Proj C)\n"
+        "add_executable(app main.c)\n"
+        "target_link_libraries(app PRIVATE something)\n",
+        encoding="utf-8",
+    )
+    lib, destination = _install(library, root)
+
+    cmake.integrate(root / "CMakeLists.txt", lib, destination, root)
+
+    assert "target_link_libraries(app PRIVATE demo_lib)" in (
+        root / "CMakeLists.txt"
+    ).read_text(encoding="utf-8")
+
+
+def test_reinstalling_does_not_flip_the_signature(library, project):
+    """The tool must not read its own previous block back as evidence."""
+    root = project(cmake=True)
+    (root / "CMakeLists.txt").write_text(
+        "cmake_minimum_required(VERSION 3.22)\n"
+        "project(Proj C)\n"
+        "add_executable(${CMAKE_PROJECT_NAME})\n"
+        "target_link_libraries(${CMAKE_PROJECT_NAME}\n    stm32cubemx\n)\n",
+        encoding="utf-8",
+    )
+    lib, destination = _install(library, root)
+
+    cmake.integrate(root / "CMakeLists.txt", lib, destination, root)
+    cmake.integrate(root / "CMakeLists.txt", lib, destination, root)
+    text = (root / "CMakeLists.txt").read_text(encoding="utf-8")
+
+    assert "PRIVATE demo_lib" not in text
+    assert text.count("demo_lib") == 1

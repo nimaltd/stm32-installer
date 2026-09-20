@@ -28,6 +28,42 @@ TARGET = re.compile(r"^\s*add_(?:executable|library)\s*\(\s*([^\s)]+)", re.MULTI
 # CubeMX generated CMake projects define the target through the project() name.
 PROJECT = re.compile(r"^\s*project\s*\(\s*([^\s)]+)", re.MULTILINE)
 
+# target_link_libraries(<target> <first thing after it>
+LINK_CALL = re.compile(r"target_link_libraries\s*\(\s*([^\s)]+)\s+([^\s)]+)")
+
+# A block this tool wrote previously, so it can be ignored when reading the file.
+OWN_BLOCK = re.compile(r"# >>> stm32-installer:.*?# <<< stm32-installer:[^\n]*\n?", re.DOTALL)
+
+KEYWORDS = ("PRIVATE", "PUBLIC", "INTERFACE")
+
+
+def _target_name(library):
+    """
+    What to call the generated library target.
+
+    Suffixed on purpose. A project is very often named after the library being
+    tried out in it, and CMake refuses to create two targets with one name.
+    Testing fsm in a CubeMX project called fsm is exactly how this shows up.
+    """
+    return f"{library.name}_lib"
+
+
+def _uses_plain_signature(text):
+    """
+    Whether this project already links libraries without a PRIVATE keyword.
+
+    CMake refuses to mix the plain and keyword forms on one target, and the
+    CubeMX template uses the plain one, so matching what is already there is
+    not a matter of style. Getting it wrong fails every CubeMX CMake project.
+    """
+    # Blocks this tool wrote are skipped, or a second install would read its own
+    # keyword form back and decide the project uses keywords.
+    for match in LINK_CALL.finditer(OWN_BLOCK.sub("", text)):
+        if match.group(2).upper() not in KEYWORDS:
+            return True
+
+    return False
+
 
 def detect(project_root):
     """The project's CMakeLists.txt, when this looks like a CMake project."""
@@ -56,6 +92,7 @@ def _find_target(text):
 
 def _library_cmakelists(library):
     """The CMakeLists.txt written into the library's own folder."""
+    target = _target_name(library)
     listed = "\n".join(f"    ${{CMAKE_CURRENT_SOURCE_DIR}}/{name}" for name in library.build_sources)
     includes = " ".join(
         "${CMAKE_CURRENT_SOURCE_DIR}" if d == "." else f"${{CMAKE_CURRENT_SOURCE_DIR}}/{d}"
@@ -69,27 +106,36 @@ def _library_cmakelists(library):
 # {library.name}.c find main.h and the HAL headers. A STATIC library would not see
 # them and would fail to compile.
 #
+# The target is called {target} rather than {library.name}, because a project is often
+# named after the library being tried out in it, and CMake allows only one
+# target of a given name.
+#
 # Edit the list below if you add files. Nothing else needs to change.
 
-add_library({library.name} INTERFACE)
+add_library({target} INTERFACE)
 
-target_sources({library.name} INTERFACE
+target_sources({target} INTERFACE
 {listed}
 )
 
-target_include_directories({library.name} INTERFACE {includes})
+target_include_directories({target} INTERFACE {includes})
 """
 
 
-def _block(library_name, folder):
+def _block(library, folder, plain):
     """The two lines this tool owns inside the user's CMakeLists.txt."""
+    target = _target_name(library)
+    link = f"target_link_libraries(@TARGET@ {target})" if plain else (
+        f"target_link_libraries(@TARGET@ PRIVATE {target})"
+    )
+
     return (
-        f"{MARK_OPEN.format(name=library_name)}\n"
+        f"{MARK_OPEN.format(name=library.name)}\n"
         f"# Added by stm32-installer. Delete this block to drop the library from\n"
         f"# the build. Its file list lives in {folder}/{LIBRARY_FILE}.\n"
         f"add_subdirectory({folder})\n"
-        f"target_link_libraries(@TARGET@ PRIVATE {library_name})\n"
-        f"{MARK_CLOSE.format(name=library_name)}"
+        f"{link}\n"
+        f"{MARK_CLOSE.format(name=library.name)}"
     )
 
 
@@ -124,7 +170,7 @@ def integrate(cmakelists, library, destination, project_root):
         return Outcome(NAME, MANUAL, f"Could not write {folder}/{LIBRARY_FILE}: {error}",
                        _manual_steps(folder, library))
 
-    block = _block(library.name, folder).replace("@TARGET@", target)
+    block = _block(library, folder, _uses_plain_signature(text)).replace("@TARGET@", target)
 
     open_mark = MARK_OPEN.format(name=library.name)
     close_mark = MARK_CLOSE.format(name=library.name)
@@ -170,5 +216,6 @@ def _manual_steps(folder, library):
     return [
         "Add this to your CMakeLists.txt, using your own target name:",
         f"add_subdirectory({folder})",
-        f"target_link_libraries(your_target PRIVATE {library.name})",
+        f"target_link_libraries(your_target PRIVATE {_target_name(library)})",
+        "Drop the PRIVATE if your project links libraries without it.",
     ]
