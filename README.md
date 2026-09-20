@@ -87,9 +87,11 @@ Either way it then registers the library with your IDE, and prints what it needs
 ```cmake
 # >>> stm32-installer: fsm >>>
 add_subdirectory(fsm)
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE fsm)
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE fsm_lib)
 # <<< stm32-installer: fsm <<<
 ```
+
+The target is called `fsm_lib` rather than `fsm`, because a project is often named after the library being tried out in it and CMake allows only one target per name. The `PRIVATE` keyword is dropped when your project links its libraries without one, since CMake refuses to mix the two forms.
 
 The generated `fsm/CMakeLists.txt` declares an INTERFACE target, not a STATIC one. That matters: an INTERFACE target hands its sources to whoever links it, so they are compiled as part of your application and inherit its defines and include paths. That is what lets a driver's `.c` file find `main.h` and the HAL headers. A STATIC library would not see them and would fail to compile.
 
@@ -144,32 +146,34 @@ requires:
 install:
   layout: flat          # flat (default) puts every file at the top of the
                         # folder, so one include path covers the library.
-                        # mirror keeps inc/ and src/, for a library too big
-                        # to flatten sensibly.
+                        # mirror keeps the repository's own folders, for a
+                        # library too big to flatten sensibly.
 
 files:
   headers:
-    - inc/fsm.h
+    - src/fsm.h
   sources:
     - src/fsm.c
     - from: src/port/spi.c    # a file can say exactly where it goes, which
       to: port/spi.c          # overrides the layout for that one file
 
 config:                 # copied once, then it belongs to the user
-  - from: template/fsm_config.h
-  - from: template/fsm_port.c       # a .c template works the same way
-    to: my_port.c                   # "to" only when you want a different name
+  - from: src/fsm_config.h
+  - from: src/fsm_port.c  # a .c template works the same way
+    to: my_port.c         # "to" only when the name should change
 
 extras: [LICENSE.md, NOTICE]   # this is the default, so it can be left out
 ```
 
-Templates live in `template/`, under the name they should end up with. That folder is stripped out after an install, so the copy the user edits is the only one left.
+A file listed under `config` is copied only when it is missing, so the user's own edits survive every update. It keeps its own name unless you give it a `to`.
+
+One catch worth knowing: `#include "x.h"` searches the including file's own folder before any include path, so a config sitting beside the header that includes it will always win. That is fine when the library's tests use the same config, and it is why the tests here are written against `FSM_MAX_TASKS` rather than a fixed number.
 
 The include path follows the layout on its own: `flat` gives the library folder, `mirror` gives wherever the headers landed. Add `install.include_dirs` only when that guess is wrong.
 
 Three things about this that are easy to get wrong:
 
-**A `.c` template is a source.** If you ship a port layer as `template/demo_port.c`, it is added to the build like any other source. Leaving it out would fail at link time with undefined references and no clue why.
+**A `.c` template is a source.** If you ship a port layer as `src/demo_port.c` that lands as `my_port.c`, it is added to the build like any other source. Leaving it out would fail at link time with undefined references and no clue why.
 
 **`kind: rtos` implies `provides: [rtos]`.** A library that is an operating system satisfies another library's RTOS requirement, whether or not you remembered to write it down.
 
