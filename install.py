@@ -16,9 +16,9 @@ this file has a library sitting next to it.
         project, and this repository ships a test suite with its own main(),
         which would break your build.
 
-    python install.py fsm
-        This copy is not tied to any library, so it takes the name. The copy in
-        a library's own repository knows its name already and needs no argument.
+    python install.py nimaltd/fsm
+        This copy is not tied to any library, so it takes the address. The copy
+        in a library's own repository knows its own and needs no argument.
 
 Your own <library>_config.h is never overwritten, so either form is also how you
 update.
@@ -39,12 +39,20 @@ import zipfile
 from pathlib import Path
 
 # Which library this copy installs when it is downloaded on its own, away from
-# the repository. Set per repository. The copy in stm32-installer leaves it None,
-# because that one is not tied to any particular library.
+# its repository, and which branch to take it from.
+#
+# Written as "owner/name" rather than a bare name so that a fork under someone
+# else's account works by changing this one line. A full GitHub URL works too.
+# The copy in the stm32-installer repository leaves LIBRARY as None, because
+# that one is not tied to any particular library.
 LIBRARY = None
+BRANCH = "master"
+
+# Where the installer itself comes from. Anyone maintaining their own libraries
+# with this tool points these at their own repositories and changes nothing else.
+SOURCE = "https://github.com/nimaltd/stm32-installer/archive/refs/heads/main.zip"
 
 MODULE = "stm32_installer"
-SOURCE = "https://github.com/nimaltd/stm32-installer/archive/refs/heads/main.zip"
 MANIFEST = "library.yml"
 TIMEOUT_SECONDS = 30
 
@@ -136,7 +144,7 @@ def main(argv=None):
     # Downloaded on its own, with no name given. This copy knows which library
     # it came from, which is what makes the one line command work.
     if not beside_a_library and not argv and LIBRARY:
-        argv = [LIBRARY]
+        argv = [LIBRARY, "--ref", BRANCH]
 
     if not beside_a_library and not argv:
         print(

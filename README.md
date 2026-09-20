@@ -165,7 +165,19 @@ Three things about this that are easy to get wrong:
 
 **`LICENSE.md` and `NOTICE` travel with the code.** The Apache licence requires it, and the NOTICE file is what carries your attribution into someone else's product. They are never removed during cleanup.
 
-Then copy `install.py` in from this repository. Nothing in it needs changing: with a `library.yml` beside it, it installs that library, and on its own it takes the library name as an argument instead.
+Then copy `install.py` in from this repository and set the three constants near the top:
+
+```python
+LIBRARY = "nimaltd/fsm"     # owner/name, so a fork under another account works
+BRANCH  = "master"          # the branch that library lives on
+
+# Where the installer itself comes from.
+SOURCE = "https://github.com/nimaltd/stm32-installer/archive/refs/heads/main.zip"
+```
+
+`LIBRARY` also accepts a full GitHub URL. It is what makes the one line install work: the file knows which library it belongs to, so whoever downloads it has nothing to type.
+
+That is all three of them. If you maintain your own libraries with this tool, point `SOURCE` at your own fork and the rest follows.
 
 ---
 
