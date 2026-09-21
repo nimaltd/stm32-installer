@@ -7,57 +7,108 @@ the include path.
 
 Edited as text, not through an XML parser, so the rest of the file comes out of
 this byte for byte identical.
+
+The group is named after the library and nothing else, because that name is what
+the user reads in the project tree all day. Knowing whether the library is
+already there is therefore worked out from the file paths in the project rather
+than from a marker in the name, which also means a group the user renamed is
+still recognised.
 """
 
 import re
 from pathlib import Path
 
-from .base import ALREADY, CHANGED, MANUAL, Outcome, backup, include_folders, relative
+from .base import (
+    ALREADY,
+    CHANGED,
+    MANUAL,
+    Outcome,
+    backup,
+    include_folders,
+    indent_of,
+    indent_step,
+    inner_indent,
+    insert_before,
+    is_backup,
+    line_ending,
+    read,
+    relative,
+    write,
+)
 
 NAME = "Keil MDK"
-
-GROUP_NAME = "stm32-installer"
 
 # <IncludePath>..\Core\Inc;..\Drivers\...</IncludePath>
 INCLUDE_PATH = re.compile(r"(<IncludePath>)(.*?)(</IncludePath>)", re.DOTALL)
 
-# The <Groups> container holding the project's file groups.
-GROUPS_OPEN = re.compile(r"<Groups>")
+# <FilePath>..\Core\Src\main.c</FilePath>, read to see which slash is used and
+# to tell whether the library's files are in the project already.
+FILE_PATH = re.compile(r"<FilePath>(.*?)</FilePath>", re.DOTALL)
+
+# The <Groups> container holding a target's file groups, and its body. There is
+# one per target, and a project with a second target needs the library in both.
+GROUPS = re.compile(r"(<Groups>)(.*?)(</Groups>)", re.DOTALL)
 
 
 def detect(project_root):
-    """The .uvprojx file, when this looks like a Keil project."""
-    matches = sorted(Path(project_root).glob("**/*.uvprojx"))
+    """
+    The .uvprojx file, when this looks like a Keil project.
 
-    return matches[0] if matches else None
+    Backups are skipped for the same reason as in the IAR integration: a copy
+    the IDE left behind is a valid project file, and editing it changes nothing
+    the user can see.
+    """
+    found = [p for p in sorted(Path(project_root).glob("**/*.uvprojx")) if not is_backup(p)]
+
+    return found[0] if found else None
 
 
-def _file_entry(source_path):
+def _separator(text):
+    """
+    Which slash the project already writes its paths with.
+
+    uVision writes backslashes into a path added through its own dialogs, and
+    CubeMX generates forward slashes. Keil reads either, so the right one to use
+    is simply whichever the file already uses.
+    """
+    paths = "".join(match.group(2) for match in INCLUDE_PATH.finditer(text))
+    paths += "".join(match.group(1) for match in FILE_PATH.finditer(text))
+
+    return "\\" if paths.count("\\") > paths.count("/") else "/"
+
+
+def _file_paths(folder, sources, sep):
+    """The <FilePath> values this would write, in the project's own slash."""
+    base = folder.replace("/", sep)
+
+    return [f"{base}{sep}{name}" for name in sources]
+
+
+def _file_entry(source_path, pad, step):
     """One <File> element, in the shape uVision writes them."""
-    name = Path(source_path).name
-    windows_path = str(source_path).replace("/", "\\")
-
-    return (
-        "        <File>\n"
-        f"          <FileName>{name}</FileName>\n"
-        "          <FileType>1</FileType>\n"
-        f"          <FilePath>{windows_path}</FilePath>\n"
-        "        </File>\n"
-    )
+    return [
+        f"{pad}<File>",
+        f"{pad}{step}<FileName>{Path(source_path).name}</FileName>",
+        f"{pad}{step}<FileType>1</FileType>",
+        f"{pad}{step}<FilePath>{source_path}</FilePath>",
+        f"{pad}</File>",
+    ]
 
 
-def _group(library_name, folder, sources):
+def _group(library_name, paths, pad, step, newline):
     """A <Group> holding every source file of one library."""
-    files = "".join(_file_entry(f"{folder}/{name}") for name in sources)
+    lines = [
+        f"{pad}<Group>",
+        f"{pad}{step}<GroupName>{library_name}</GroupName>",
+        f"{pad}{step}<Files>",
+    ]
 
-    return (
-        "      <Group>\n"
-        f"        <GroupName>{GROUP_NAME}: {library_name}</GroupName>\n"
-        "        <Files>\n"
-        f"{files}"
-        "        </Files>\n"
-        "      </Group>\n"
-    )
+    for source_path in paths:
+        lines += _file_entry(source_path, pad + step + step, step)
+
+    lines += [f"{pad}{step}</Files>", f"{pad}</Group>"]
+
+    return newline.join(lines)
 
 
 def integrate(uvprojx, library, destination, project_root):
@@ -67,19 +118,14 @@ def integrate(uvprojx, library, destination, project_root):
     folder = relative(destination, path.parent)
 
     try:
-        text = path.read_text(encoding="utf-8")
+        text = read(path)
     except OSError as error:
         return Outcome(NAME, MANUAL, f"Could not read {path.name}: {error}", _manual_steps(folder))
 
-    marker = f"<GroupName>{GROUP_NAME}: {library.name}</GroupName>"
-
-    if marker in text:
-        return Outcome(NAME, ALREADY, f"{path.name} already has {library.name}.")
-
     includes = list(INCLUDE_PATH.finditer(text))
-    groups = GROUPS_OPEN.search(text)
+    containers = list(GROUPS.finditer(text))
 
-    if not includes or groups is None:
+    if not includes or not containers:
         return Outcome(
             NAME,
             MANUAL,
@@ -87,27 +133,48 @@ def integrate(uvprojx, library, destination, project_root):
             _manual_steps(folder),
         )
 
-    saved = backup(path)
+    newline = line_ending(text)
+    sep = _separator(text)
+    paths = _file_paths(folder, library.build_sources, sep)
+
+    # A header only library has nothing to compile, so it gets an include path
+    # and no group. An empty group would be added again on every run, since
+    # there would be no file in the project to recognise it by.
+    wanted = paths and not any(f"<FilePath>{p}</FilePath>" in text for p in paths)
+
     updated = text
 
-    # Insert the group first, since it sits later in the file than the include
-    # paths in every .uvprojx seen so far. Doing it in this order would still be
-    # wrong if that ever changed, so both edits are recomputed from scratch.
-    at = GROUPS_OPEN.search(updated).end()
-    updated = updated[:at] + "\n" + _group(library.name, folder, library.build_sources) + updated[at:]
+    if wanted:
+        # The group is appended after the target's own groups, which is where
+        # uVision puts one added through Manage Project Items. Walking backwards
+        # keeps each insertion from moving the offsets of the next.
+        for container in reversed(containers):
+            outer = indent_of(text, container.start())
+            inner = inner_indent(container.group(2), outer)
+            step = indent_step(outer, inner)
+            at = insert_before(updated, container.start(3))
 
-    wanted = [d.replace("/", "\\") for d in include_folders(library, folder)]
+            block = _group(library.name, paths, inner, step, newline)
+
+            updated = updated[:at] + newline + block + updated[at:]
+
+    directories = [d.replace("/", sep) for d in include_folders(library, folder.replace("/", sep))]
 
     def add_include(match):
         parts = [p for p in match.group(2).split(";") if p.strip()]
-        parts += [d for d in wanted if d not in parts]
+        parts += [d for d in directories if d not in parts]
 
         return match.group(1) + ";".join(parts) + match.group(3)
 
     updated = INCLUDE_PATH.sub(add_include, updated)
 
+    if updated == text:
+        return Outcome(NAME, ALREADY, f"{path.name} already has {library.name}.")
+
+    saved = backup(path)
+
     try:
-        path.write_text(updated, encoding="utf-8")
+        write(path, updated)
     except OSError as error:
         return Outcome(NAME, MANUAL, f"Could not write {path.name}: {error}",
                        _manual_steps(folder), saved)
@@ -115,7 +182,7 @@ def integrate(uvprojx, library, destination, project_root):
     return Outcome(
         NAME,
         CHANGED,
-        f"Added {library.name} to {path.name} as group '{GROUP_NAME}: {library.name}'.",
+        f"Added {library.name} to {path.name} in {len(containers)} target(s).",
         steps=["Close and reopen the project in uVision so it reloads the file list."],
         backup=saved,
     )

@@ -333,15 +333,20 @@ class Manifest:
         file has to reach the build like any other source. Leaving it out is
         silent: the file exists, the project looks right, and the link fails
         with undefined references.
-        """
-        names = [entry.destination for entry in self.sources]
-        names += [
-            entry.destination
-            for entry in self.once
-            if Path(entry.destination).suffix.lower() in (".c", ".cpp", ".cc", ".s")
-        ]
 
-        return names
+        Only files a compiler can actually take are listed, and that filter
+        covers `sources` as well as `once`. Keil and IAR name every file in the
+        project explicitly, so anything that gets in here shows up in the IDE's
+        file tree and is handed to the compiler. A README that reached it by way
+        of a mistyped manifest would be visible, confusing, and a build error.
+        """
+        wanted = (".c", ".cpp", ".cc", ".cxx", ".s", ".asm")
+
+        return [
+            entry.destination
+            for entry in list(self.sources) + list(self.once)
+            if Path(entry.destination).suffix.lower() in wanted
+        ]
 
     @property
     def required_files(self):

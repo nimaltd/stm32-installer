@@ -13,14 +13,33 @@ and a .cproject missing that line is a project that will not open.
 import re
 from pathlib import Path
 
-from .base import ALREADY, CHANGED, MANUAL, Outcome, backup, include_folders, relative
+from .base import (
+    ALREADY,
+    CHANGED,
+    MANUAL,
+    Outcome,
+    backup,
+    include_folders,
+    indent_of,
+    inner_indent,
+    insert_before,
+    line_ending,
+    read,
+    relative,
+    write,
+)
 
 NAME = "STM32CubeIDE"
 
-# <option ... superClass="....compiler.option.includepaths" ... > with children.
+# <option ... superClass="....compiler.option.includepaths" ...> and its body.
+# The lookbehind keeps a self closing <option .../> out, since it has no body
+# to add a path to. Options never nest, so the first </option> after the opening
+# tag is always the matching one, even with self closing siblings in between.
 INCLUDE_OPTION = re.compile(
-    r'(<option[^>]*superClass="[^"]*compiler\.option\.includepaths"[^>]*(?<!/)>)',
-    re.IGNORECASE,
+    r'(<option[^>]*superClass="[^"]*compiler\.option\.includepaths"[^>]*(?<!/)>)'
+    r"(.*?)"
+    r"(</option>)",
+    re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -45,7 +64,7 @@ def integrate(cproject, library, destination, project_root):
     wanted = [f"../{d}" for d in include_folders(library, folder)]
 
     try:
-        text = path.read_text(encoding="utf-8")
+        text = read(path)
     except OSError as error:
         return Outcome(NAME, MANUAL, f"Could not read .cproject: {error}", _manual_steps(folder))
 
@@ -59,32 +78,52 @@ def integrate(cproject, library, destination, project_root):
             _manual_steps(folder),
         )
 
-    missing = [value for value in wanted if f'value="{value}"' not in text]
+    # Asked of each configuration separately rather than of the whole file. A
+    # project that has the path on Debug but not on Release is one a whole file
+    # check would call finished, and the missing half would only turn up as a
+    # build that fails in one configuration and not the other.
+    pending = [
+        (match, [value for value in wanted if f'value="{value}"' not in match.group(2)])
+        for match in matches
+    ]
+    pending = [(match, gaps) for match, gaps in pending if gaps]
 
-    if not missing:
+    if not pending:
         return Outcome(NAME, ALREADY, f"{folder} is already on the include path.")
 
     saved = backup(path)
 
-    added = "\n".join(f'<listOptionValue builtIn="false" value="{value}"/>' for value in missing)
+    newline = line_ending(text)
+    updated = text
 
     # Walk backwards, so each insertion does not move the offsets of the next.
-    updated = text
-    for match in reversed(matches):
-        at = match.end()
-        updated = updated[:at] + "\n" + added + updated[at:]
+    for match, gaps in reversed(pending):
+        outer = indent_of(text, match.start())
+        inner = inner_indent(match.group(2), outer)
+        at = insert_before(updated, match.start(3))
+
+        added = "".join(
+            f'{newline}{inner}<listOptionValue builtIn="false" value="{value}"/>'
+            for value in gaps
+        )
+
+        # Appended after the paths that are already there, which is where
+        # CubeIDE itself puts one added through the Properties dialog.
+        updated = updated[:at] + added + updated[at:]
 
     try:
-        path.write_text(updated, encoding="utf-8")
+        write(path, updated)
     except OSError as error:
         return Outcome(NAME, MANUAL, f"Could not write .cproject: {error}",
                        _manual_steps(folder), saved)
 
+    names = [value for value in wanted if any(value in gaps for _, gaps in pending)]
+
     return Outcome(
         NAME,
         CHANGED,
-        f"Added {', '.join(missing)} to the include paths of "
-        f"{len(matches)} build configuration(s).",
+        f"Added {', '.join(names)} to the include paths of "
+        f"{len(pending)} build configuration(s).",
         steps=["Refresh the project in CubeIDE (F5) so it picks up the new files."],
         backup=saved,
     )

@@ -16,7 +16,19 @@ it, so they are compiled as part of the application and inherit everything it ha
 import re
 from pathlib import Path
 
-from .base import ALREADY, CHANGED, MANUAL, MARK_CLOSE, MARK_OPEN, Outcome, backup, relative
+from .base import (
+    ALREADY,
+    CHANGED,
+    MANUAL,
+    MARK_CLOSE,
+    MARK_OPEN,
+    Outcome,
+    backup,
+    line_ending,
+    read,
+    relative,
+    write,
+)
 
 NAME = "CMake"
 
@@ -145,7 +157,7 @@ def integrate(cmakelists, library, destination, project_root):
     folder = relative(destination, project_root)
 
     try:
-        text = path.read_text(encoding="utf-8")
+        text = read(path)
     except OSError as error:
         return Outcome(NAME, MANUAL, f"Could not read {path.name}: {error}",
                        _manual_steps(folder, library))
@@ -163,14 +175,19 @@ def integrate(cmakelists, library, destination, project_root):
     # Written every time, so adding a source file to a library reaches everyone
     # who updates, without them editing anything.
     try:
-        (Path(destination) / LIBRARY_FILE).write_text(
-            _library_cmakelists(library), encoding="utf-8"
-        )
+        write(Path(destination) / LIBRARY_FILE, _library_cmakelists(library))
     except OSError as error:
         return Outcome(NAME, MANUAL, f"Could not write {folder}/{LIBRARY_FILE}: {error}",
                        _manual_steps(folder, library))
 
+    newline = line_ending(text)
+
+    # Built with the line ending the file already uses, and before the block is
+    # compared with the one already in the file. Comparing a block built with
+    # line feeds against a stored block written with CRLF never matches, and the
+    # integration would rewrite the file and take a backup on every single run.
     block = _block(library, folder, _uses_plain_signature(text)).replace("@TARGET@", target)
+    block = block.replace("\n", newline)
 
     open_mark = MARK_OPEN.format(name=library.name)
     close_mark = MARK_CLOSE.format(name=library.name)
@@ -195,10 +212,10 @@ def integrate(cmakelists, library, destination, project_root):
         updated = text[:start] + block + text[end:]
     else:
         saved = backup(path)
-        updated = text.rstrip("\n") + "\n\n" + block + "\n"
+        updated = text.rstrip("\r\n") + newline + newline + block + newline
 
     try:
-        path.write_text(updated, encoding="utf-8")
+        write(path, updated)
     except OSError as error:
         return Outcome(NAME, MANUAL, f"Could not write {path.name}: {error}",
                        _manual_steps(folder, library), saved)

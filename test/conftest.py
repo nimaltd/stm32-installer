@@ -83,64 +83,210 @@ def library(tmp_path):
     return build
 
 
+# The project files below are nested and indented the way the real tools write
+# them, tabs in a .cproject and spaces in the other two, because what these
+# fixtures are used to check is that an added line comes out looking like the
+# lines around it. A flat fixture cannot tell a right answer from a wrong one.
+
+CPROJECT = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
+    "<?fileVersion 4.0.0?><cproject>\n"
+    "\t<storageModule moduleId=\"cdtBuildSystem\">\n"
+    "\t\t<configuration name=\"Debug\">\n"
+    "\t\t\t<toolChain>\n"
+    "\t\t\t\t<tool>\n"
+    "\t\t\t\t\t<option id=\"a\" superClass=\"x.c.compiler.option.includepaths\""
+    " valueType=\"includePath\">\n"
+    "\t\t\t\t\t\t<listOptionValue builtIn=\"false\" value=\"../Core/Inc\"/>\n"
+    "\t\t\t\t\t\t<listOptionValue builtIn=\"false\" value=\"../Drivers/CMSIS/Include\"/>\n"
+    "\t\t\t\t\t</option>\n"
+    "\t\t\t\t\t<option id=\"opt\" superClass=\"x.c.compiler.option.optimization.level\"/>\n"
+    "\t\t\t\t</tool>\n"
+    "\t\t\t</toolChain>\n"
+    "\t\t</configuration>\n"
+    "\t\t<configuration name=\"Release\">\n"
+    "\t\t\t<toolChain>\n"
+    "\t\t\t\t<tool>\n"
+    "\t\t\t\t\t<option id=\"b\" superClass=\"x.c.compiler.option.includepaths\""
+    " valueType=\"includePath\">\n"
+    "\t\t\t\t\t\t<listOptionValue builtIn=\"false\" value=\"../Core/Inc\"/>\n"
+    "\t\t\t\t\t\t<listOptionValue builtIn=\"false\" value=\"../Drivers/CMSIS/Include\"/>\n"
+    "\t\t\t\t\t</option>\n"
+    "\t\t\t\t</tool>\n"
+    "\t\t\t</toolChain>\n"
+    "\t\t</configuration>\n"
+    "\t</storageModule>\n"
+    "</cproject>\n"
+)
+
+# Backslash paths, which is what uVision writes once a path has been added
+# through its own dialogs. The CubeMX generated form uses forward slashes and
+# has its own test.
+UVPROJX = (
+    '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
+    "<Project>\n"
+    "  <Targets>\n"
+    "    <Target>\n"
+    "      <TargetOption>\n"
+    "        <TargetArmAds>\n"
+    "          <Cads>\n"
+    "            <VariousControls>\n"
+    "              <IncludePath>..\\Core\\Inc</IncludePath>\n"
+    "            </VariousControls>\n"
+    "          </Cads>\n"
+    "        </TargetArmAds>\n"
+    "      </TargetOption>\n"
+    "      <Groups>\n"
+    "        <Group>\n"
+    "          <GroupName>Application/User/Core</GroupName>\n"
+    "          <Files>\n"
+    "            <File>\n"
+    "              <FileName>main.c</FileName>\n"
+    "              <FileType>1</FileType>\n"
+    "              <FilePath>..\\Core\\Src\\main.c</FilePath>\n"
+    "            </File>\n"
+    "          </Files>\n"
+    "        </Group>\n"
+    "      </Groups>\n"
+    "    </Target>\n"
+    "  </Targets>\n"
+    "</Project>\n"
+)
+
+# Four space indentation, groups nested inside groups, and the two slashes
+# mixed: forward in the include paths, back in the file list. All three come
+# straight from a CubeMX generated EWARM project, and all three were getting
+# the integration wrong until a real one was looked at.
+EWP = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    "<project>\n"
+    "    <fileVersion>4</fileVersion>\n"
+    "    <configuration>\n"
+    "        <name>Proj</name>\n"
+    "        <settings>\n"
+    "            <name>ICCARM</name>\n"
+    "            <data>\n"
+    "                <option>\n"
+    "                    <name>CCIncludePath2</name>\n"
+    "                    <state>$PROJ_DIR$/../Core/Inc</state>\n"
+    "                    <state>$PROJ_DIR$/../Drivers/CMSIS/Include</state>\n"
+    "                </option>\n"
+    "            </data>\n"
+    "        </settings>\n"
+    "    </configuration>\n"
+    "    <group>\n"
+    "        <name>Application</name>\n"
+    "        <group>\n"
+    "            <name>User</name>\n"
+    "            <group>\n"
+    "                <name>Core</name>\n"
+    "                <file>\n"
+    "                    <name>$PROJ_DIR$\\..\\Core\\Src\\main.c</name>\n"
+    "                </file>\n"
+    "            </group>\n"
+    "        </group>\n"
+    "    </group>\n"
+    "    <group>\n"
+    "        <name>Drivers</name>\n"
+    "        <file>\n"
+    "            <name>$PROJ_DIR$\\..\\Drivers\\stm32g4xx_hal.c</name>\n"
+    "        </file>\n"
+    "        <file>\n"
+    "            <name>$PROJ_DIR$\\..\\Drivers\\stm32g4xx_hal_rcc.c</name>\n"
+    "        </file>\n"
+    "        <file>\n"
+    "            <name>$PROJ_DIR$\\..\\Drivers\\stm32g4xx_hal_gpio.c</name>\n"
+    "        </file>\n"
+    "        <file>\n"
+    "            <name>$PROJ_DIR$\\..\\Drivers\\stm32g4xx_hal_tim.c</name>\n"
+    "        </file>\n"
+    "    </group>\n"
+    "</project>\n"
+)
+
+# The workspace, which is what says which .ewp is the real project.
+EWW = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    "<workspace>\n"
+    "  <project>\n"
+    "    <path>$WS_DIR$\\Proj.ewp</path>\n"
+    "  </project>\n"
+    "  <batchBuild />\n"
+    "</workspace>\n"
+)
+
+# The companion IAR keeps beside every .ewp, carrying the same file tree for
+# the analysis tools and no include paths at all.
+EWT = (
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+    "<project>\n"
+    "    <fileVersion>4</fileVersion>\n"
+    "    <configuration>\n"
+    "        <name>Proj</name>\n"
+    "    </configuration>\n"
+    "    <group>\n"
+    "        <name>Drivers</name>\n"
+    "        <file>\n"
+    "            <name>$PROJ_DIR$\\..\\Drivers\\stm32g4xx_hal.c</name>\n"
+    "        </file>\n"
+    "    </group>\n"
+    "</project>\n"
+)
+
+
 @pytest.fixture
 def project(tmp_path):
     """
     Build an STM32 project on disk and return its path.
 
     Which IDE files appear is up to the test, since the point of most of them is
-    checking one integration at a time.
+    checking one integration at a time. `newline` is there because CubeMX writes
+    CRLF on Windows, and an integration that does not notice rewrites the line
+    endings of the whole file to add one line to it.
     """
 
-    def build(cmake=False, cubeide=False, keil=False, iar=False, hal_conf=None, ioc=None):
+    def build(cmake=False, cubeide=False, keil=False, iar=False, hal_conf=None, ioc=None,
+              newline="\n", iar_backup=False, keil_backup=False):
         root = tmp_path / "Proj"
         (root / "Core" / "Inc").mkdir(parents=True, exist_ok=True)
         (root / "Core" / "Src").mkdir(parents=True, exist_ok=True)
         (root / "Core" / "Src" / "main.c").write_text("/* main */\n", encoding="utf-8")
 
+        def put(path, text):
+            """Write a project file with the line ending this test asked for."""
+            path.write_bytes(text.replace("\n", newline).encode("utf-8"))
+
         if cmake:
-            (root / "CMakeLists.txt").write_text(
+            put(
+                root / "CMakeLists.txt",
                 "cmake_minimum_required(VERSION 3.22)\n"
                 "project(Proj C ASM)\n"
                 "add_executable(${CMAKE_PROJECT_NAME} Core/Src/main.c)\n",
-                encoding="utf-8",
             )
 
         if cubeide:
-            (root / ".project").write_text("<projectDescription/>\n", encoding="utf-8")
-            (root / ".cproject").write_text(
-                '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n'
-                "<?fileVersion 4.0.0?><cproject>\n"
-                '  <option id="a" superClass="x.c.compiler.option.includepaths" valueType="includePath">\n'
-                '    <listOptionValue builtIn="false" value="../Core/Inc"/>\n'
-                "  </option>\n"
-                '  <option id="b" superClass="x.c.compiler.option.includepaths" valueType="includePath">\n'
-                '    <listOptionValue builtIn="false" value="../Core/Inc"/>\n'
-                "  </option>\n"
-                "</cproject>\n",
-                encoding="utf-8",
-            )
+            put(root / ".project", "<projectDescription/>\n")
+            put(root / ".cproject", CPROJECT)
 
         if keil:
             mdk = root / "MDK"
             mdk.mkdir(exist_ok=True)
-            (mdk / "Proj.uvprojx").write_text(
-                "<Project>\n  <Cads><VariousControls>\n"
-                "    <IncludePath>..\\Core\\Inc</IncludePath>\n"
-                "  </VariousControls></Cads>\n"
-                "  <Groups>\n    <Group>\n      <GroupName>Application</GroupName>\n"
-                "      <Files></Files>\n    </Group>\n  </Groups>\n</Project>\n",
-                encoding="utf-8",
-            )
+            put(mdk / "Proj.uvprojx", UVPROJX)
+
+            if keil_backup:
+                put(mdk / "Backup of Proj.uvprojx", UVPROJX)
 
         if iar:
             ewarm = root / "EWARM"
             ewarm.mkdir(exist_ok=True)
-            (ewarm / "Proj.ewp").write_text(
-                "<project>\n  <option>\n    <name>CCIncludePath2</name>\n"
-                "    <state>$PROJ_DIR$/../Core/Inc</state>\n  </option>\n</project>\n",
-                encoding="utf-8",
-            )
+            put(ewarm / "Proj.ewp", EWP)
+            put(ewarm / "Proj.ewt", EWT)
+            put(ewarm / "Project.eww", EWW)
+
+            if iar_backup:
+                # What IAR leaves behind when it upgrades a project. It is a
+                # valid .ewp, and its name sorts before the real one.
+                put(ewarm / "Backup of Proj.ewp", EWP)
 
         if hal_conf is not None:
             (root / "Core" / "Inc" / "stm32f4xx_hal_conf.h").write_text(hal_conf, encoding="utf-8")
