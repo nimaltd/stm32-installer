@@ -1,9 +1,11 @@
 """
 STM32CubeIDE, which is Eclipse underneath.
 
-Only the include path needs adding. CubeIDE treats the project folder as a source
-folder and compiles every .c under it on its own, which is also why the installer
-strips the test folder out of a library before CubeIDE ever sees it.
+Two things have to be told to the project: where the header is, and that the
+folder holds sources worth compiling. The second one is easy to miss, because
+leaving it out looks like it worked. The header resolves, the editor stops
+underlining things, and the build fails at link time on every symbol in the
+library.
 
 The .cproject file is edited as text rather than through an XML parser. It opens
 with a <?fileVersion?> processing instruction that ElementTree silently drops,
@@ -42,6 +44,15 @@ INCLUDE_OPTION = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# The list of folders one build configuration compiles, and its body.
+SOURCE_ENTRIES = re.compile(r"(<sourceEntries>)(.*?)(</sourceEntries>)", re.DOTALL)
+
+# One <entry .../> inside it. The attributes are read separately rather than
+# matched in a fixed order, since nothing promises CDT writes them the same way
+# twice.
+ENTRY = re.compile(r"<entry\b[^>]*/>")
+ATTRIBUTE = re.compile(r'(\w+)="([^"]*)"')
+
 
 def detect(project_root):
     """The .cproject file, when this looks like a CubeIDE project."""
@@ -54,13 +65,92 @@ def detect(project_root):
     return None
 
 
+def _source_paths(body):
+    """The folder names a <sourceEntries> body lists as source."""
+    names = []
+
+    for element in ENTRY.findall(body):
+        attributes = dict(ATTRIBUTE.findall(element))
+
+        if attributes.get("kind") == "sourcePath":
+            names.append(attributes.get("name", ""))
+
+    return names
+
+
+def _add_include_paths(text, wanted, newline):
+    """Put the library on the include path of every build configuration."""
+    updated = text
+
+    # Walk backwards, so each insertion does not move the offsets of the next.
+    for match in reversed(list(INCLUDE_OPTION.finditer(text))):
+        # Asked of each configuration separately rather than of the whole file.
+        # A project that has the path on Debug but not on Release is one a whole
+        # file check would call finished, and the missing half would only turn
+        # up as a build that fails in one configuration and not the other.
+        gaps = [value for value in wanted if f'value="{value}"' not in match.group(2)]
+
+        if not gaps:
+            continue
+
+        outer = indent_of(text, match.start())
+        inner = inner_indent(match.group(2), outer)
+        at = insert_before(updated, match.start(3))
+
+        # Appended after the paths that are already there, which is where
+        # CubeIDE itself puts one added through the Properties dialog.
+        updated = updated[:at] + "".join(
+            f'{newline}{inner}<listOptionValue builtIn="false" value="{value}"/>'
+            for value in gaps
+        ) + updated[at:]
+
+    return updated
+
+
+def _add_source_folder(text, folder, newline):
+    """
+    Register the library folder as one the project compiles.
+
+    A <sourceEntries> block that names folders is the list of what gets built,
+    and a folder missing from it is compiled by nobody.
+
+    A block that is empty, or that carries a root entry with name="", already
+    means the whole project is source. Adding a named entry to one of those
+    would turn "build everything" into "build only this folder" and break the
+    user's project rather than fix it, so they are left exactly as they are.
+    That guard is the reason this is safe to do without being able to test it
+    against a real CubeIDE.
+    """
+    updated = text
+
+    for match in reversed(list(SOURCE_ENTRIES.finditer(text))):
+        names = _source_paths(match.group(2))
+
+        if not names or "" in names or folder in names:
+            continue
+
+        outer = indent_of(text, match.start())
+        inner = inner_indent(match.group(2), outer)
+        at = insert_before(updated, match.start(3))
+
+        entry = (
+            f'{newline}{inner}<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" '
+            f'kind="sourcePath" name="{folder}"/>'
+        )
+
+        updated = updated[:at] + entry + updated[at:]
+
+    return updated
+
+
 def integrate(cproject, library, destination, project_root):
-    """Add the library folder to every build configuration's include paths."""
+    """Add the library to the include path and the source folders."""
     path = Path(cproject)
     folder = relative(destination, project_root)
 
     # Include paths in .cproject are relative to the build folder, not the
-    # project root, which is why CubeIDE's own entries read ../Core/Inc.
+    # project root, which is why CubeIDE's own entries read ../Core/Inc. Source
+    # folders are relative to the project, so the two are not the same string.
     wanted = [f"../{d}" for d in include_folders(library, folder)]
 
     try:
@@ -68,9 +158,7 @@ def integrate(cproject, library, destination, project_root):
     except OSError as error:
         return Outcome(NAME, MANUAL, f"Could not read .cproject: {error}", _manual_steps(folder))
 
-    matches = list(INCLUDE_OPTION.finditer(text))
-
-    if not matches:
+    if not INCLUDE_OPTION.search(text):
         return Outcome(
             NAME,
             MANUAL,
@@ -78,38 +166,17 @@ def integrate(cproject, library, destination, project_root):
             _manual_steps(folder),
         )
 
-    # Asked of each configuration separately rather than of the whole file. A
-    # project that has the path on Debug but not on Release is one a whole file
-    # check would call finished, and the missing half would only turn up as a
-    # build that fails in one configuration and not the other.
-    pending = [
-        (match, [value for value in wanted if f'value="{value}"' not in match.group(2)])
-        for match in matches
-    ]
-    pending = [(match, gaps) for match, gaps in pending if gaps]
+    newline = line_ending(text)
 
-    if not pending:
-        return Outcome(NAME, ALREADY, f"{folder} is already on the include path.")
+    updated = _add_include_paths(text, wanted, newline)
+    with_sources = _add_source_folder(updated, folder, newline)
+    registered = with_sources != updated
+    updated = with_sources
+
+    if updated == text:
+        return Outcome(NAME, ALREADY, f"{folder} is already set up in .cproject.")
 
     saved = backup(path)
-
-    newline = line_ending(text)
-    updated = text
-
-    # Walk backwards, so each insertion does not move the offsets of the next.
-    for match, gaps in reversed(pending):
-        outer = indent_of(text, match.start())
-        inner = inner_indent(match.group(2), outer)
-        at = insert_before(updated, match.start(3))
-
-        added = "".join(
-            f'{newline}{inner}<listOptionValue builtIn="false" value="{value}"/>'
-            for value in gaps
-        )
-
-        # Appended after the paths that are already there, which is where
-        # CubeIDE itself puts one added through the Properties dialog.
-        updated = updated[:at] + added + updated[at:]
 
     try:
         write(path, updated)
@@ -117,13 +184,12 @@ def integrate(cproject, library, destination, project_root):
         return Outcome(NAME, MANUAL, f"Could not write .cproject: {error}",
                        _manual_steps(folder), saved)
 
-    names = [value for value in wanted if any(value in gaps for _, gaps in pending)]
+    told = "include path and source folders" if registered else "include path"
 
     return Outcome(
         NAME,
         CHANGED,
-        f"Added {', '.join(names)} to the include paths of "
-        f"{len(pending)} build configuration(s).",
+        f"Added {folder} to the {told} in .cproject.",
         steps=["Refresh the project in CubeIDE (F5) so it picks up the new files."],
         backup=saved,
     )
@@ -135,4 +201,6 @@ def _manual_steps(folder):
         "In STM32CubeIDE: right click the project, Properties,",
         "C/C++ Build, Settings, MCU GCC Compiler, Include paths,",
         f'then add "{folder}" as a workspace path.',
+        f'If {folder} is greyed out in the project tree, right click it and',
+        "choose Resource Configurations, Exclude from Build, and clear it.",
     ]
