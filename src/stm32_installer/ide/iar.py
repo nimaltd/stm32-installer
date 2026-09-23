@@ -34,6 +34,7 @@ from .base import (
     MANUAL,
     Outcome,
     backup,
+    forward_slashes,
     include_folders,
     indent_of,
     indent_step,
@@ -120,7 +121,9 @@ def _file_names(text, folder, sources):
     sep = _separator("".join(match.group(1) for match in FILE_PATH.finditer(text)))
     base = folder.replace("/", sep)
 
-    return [f"$PROJ_DIR${sep}{base}{sep}{name}" for name in sources]
+    # The source's own folder as well: a mirror layout installs src/demo.c, and
+    # joined on as it stood that gave $PROJ_DIR$\..\demo\src/demo.c.
+    return [f"$PROJ_DIR${sep}{base}{sep}{name.replace('/', sep)}" for name in sources]
 
 
 def _group(library_name, names, pad, step, newline):
@@ -151,11 +154,12 @@ def _with_group(text, library_name, folder, sources):
     file tree for the analysis tools and no include paths at all.
     """
     names = _file_names(text, folder, sources)
+    listed = {forward_slashes(match.group(1)) for match in FILE_PATH.finditer(text)}
 
     # A header only library has nothing to compile, so it gets an include path
     # and no group. An empty group would be added again on every run, since
     # there would be no file in the project to recognise it by.
-    if not names or any(f"<name>{name}</name>" in text for name in names):
+    if not names or any(forward_slashes(name) in listed for name in names):
         return text
 
     closing = PROJECT_CLOSE.search(text)
@@ -203,11 +207,12 @@ def integrate(ewp, library, destination, project_root):
         outer = indent_of(match.string, match.start())
         inner = inner_indent(match.group(2), outer)
         body = match.group(2)
+        present = forward_slashes(body)
 
         added = [
             f"{newline}{inner}<state>$PROJ_DIR${include_sep}{d.replace('/', include_sep)}</state>"
             for d in include_folders(library, folder)
-            if f"<state>$PROJ_DIR${include_sep}{d.replace('/', include_sep)}</state>" not in body
+            if f"<state>$PROJ_DIR$/{d}</state>" not in present
         ]
 
         if not added:

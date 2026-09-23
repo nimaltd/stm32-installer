@@ -427,6 +427,27 @@ def test_keil_follows_the_slash_the_project_uses(library, project):
     assert "..\\demo" not in text
 
 
+@pytest.mark.parametrize("layout", ["flat", "mirror"])
+@pytest.mark.parametrize("slash", ["\\", "/"])
+def test_keil_names_the_file_without_its_folder(slash, layout, library, project):
+    """
+    <FileName> is what uVision shows in the project tree: demo.c, nothing more.
+
+    It used to be cut from the full path, and Linux and macOS do not split a
+    path at a backslash, so there the whole uVision style path went in. Windows
+    splits at both, which is why only CI on Linux could see it.
+    """
+    root = project(keil=True)
+    path = root / "MDK" / "Proj.uvprojx"
+    path.write_text(path.read_text(encoding="utf-8").replace("\\", slash), encoding="utf-8")
+    lib, destination = _install(library, root, install={"layout": layout})
+
+    keil.integrate(path, lib, destination, root)
+    text = path.read_text(encoding="utf-8")
+
+    assert "<FileName>demo.c</FileName>" in text
+
+
 def test_iar_lines_up_with_what_is_already_there(library, project):
     root = project(iar=True)
     lib, destination = _install(library, root)
@@ -706,6 +727,62 @@ def test_a_renamed_group_is_still_recognised(backend, where, library, project):
     assert path.read_text(encoding="utf-8") == before
     # The path, not the bare name: Keil writes the name in <FileName> as well.
     assert before.count("demo\\demo.c") == 1
+
+
+@pytest.mark.parametrize("backend, where, written", [
+    ("keil", "MDK/Proj.uvprojx", "<FilePath>..\\demo\\src\\demo.c</FilePath>"),
+    ("iar", "EWARM/Proj.ewp", "<name>$PROJ_DIR$\\..\\demo\\src\\demo.c</name>"),
+])
+def test_a_mirror_layout_path_has_one_kind_of_slash(backend, where, written, library, project):
+    """
+    A mirror layout installs src/demo.c, a source with a folder of its own.
+
+    That folder was joined on as it stood, so a project written with
+    backslashes got a path with both kinds of slash in it.
+    """
+    root = project(keil=True, iar=True)
+    lib, destination = _install(library, root, install={"layout": "mirror"})
+    path = root / where
+
+    getattr(ide, backend).integrate(path, lib, destination, root)
+    text = path.read_text(encoding="utf-8")
+
+    assert written in text
+    assert "src/demo.c" not in text
+
+
+@pytest.mark.parametrize("backend, where", [("keil", "MDK/Proj.uvprojx"),
+                                            ("iar", "EWARM/Proj.ewp")])
+def test_the_library_under_the_other_slash_is_still_recognised(backend, where, library, project):
+    """
+    The slash written is whichever the project uses most, and that can change.
+
+    Files the user adds through the IDE can tip the count, and from then on the
+    library's own paths are in the other slash. Both IDEs read either, so it is
+    the same library, and an update must add neither a second group nor a
+    second include path.
+    """
+    root = project(keil=True, iar=True)
+    lib, destination = _install(library, root)
+    path = root / where
+
+    getattr(ide, backend).integrate(path, lib, destination, root)
+    installed = path.read_text(encoding="utf-8")
+
+    # Only the library's own paths change slash, and the rest of the project
+    # keeps the one it had, which is the state an update then finds.
+    swap = str.maketrans({"\\": "/", "/": "\\"})
+    path.write_text(
+        re.sub(r"[^<>;]*demo[^<>;]*", lambda m: m.group(0).translate(swap), installed),
+        encoding="utf-8",
+    )
+    before = path.read_text(encoding="utf-8")
+    assert before != installed, "the library's paths did not change slash"
+
+    outcome = getattr(ide, backend).integrate(path, lib, destination, root)
+
+    assert outcome.status == ide.ALREADY
+    assert path.read_text(encoding="utf-8") == before
 
 
 @pytest.mark.parametrize("backend, where", [("keil", "MDK/Proj.uvprojx"),

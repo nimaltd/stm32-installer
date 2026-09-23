@@ -12,7 +12,7 @@ See https://github.com/nimaltd/stm32-installer
 from .installer import InstallError, Result, install_in_place, install_to
 from .manifest import Manifest, ManifestError, load
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 __all__ = [
     "InstallError",

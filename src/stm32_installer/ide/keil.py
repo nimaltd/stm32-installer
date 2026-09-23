@@ -16,7 +16,7 @@ still recognised.
 """
 
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .base import (
     ALREADY,
@@ -24,6 +24,7 @@ from .base import (
     MANUAL,
     Outcome,
     backup,
+    forward_slashes,
     include_folders,
     indent_of,
     indent_step,
@@ -81,30 +82,32 @@ def _file_paths(folder, sources, sep):
     """The <FilePath> values this would write, in the project's own slash."""
     base = folder.replace("/", sep)
 
-    return [f"{base}{sep}{name}" for name in sources]
+    # The source's own folder as well: a mirror layout installs src/demo.c, and
+    # joined on as it stood that gave ..\demo\src/demo.c.
+    return [f"{base}{sep}{name.replace('/', sep)}" for name in sources]
 
 
-def _file_entry(source_path, pad, step):
+def _file_entry(file_name, file_path, pad, step):
     """One <File> element, in the shape uVision writes them."""
     return [
         f"{pad}<File>",
-        f"{pad}{step}<FileName>{Path(source_path).name}</FileName>",
+        f"{pad}{step}<FileName>{file_name}</FileName>",
         f"{pad}{step}<FileType>1</FileType>",
-        f"{pad}{step}<FilePath>{source_path}</FilePath>",
+        f"{pad}{step}<FilePath>{file_path}</FilePath>",
         f"{pad}</File>",
     ]
 
 
-def _group(library_name, paths, pad, step, newline):
-    """A <Group> holding every source file of one library."""
+def _group(library_name, files, pad, step, newline):
+    """A <Group> holding every source file of one library, as (name, path) pairs."""
     lines = [
         f"{pad}<Group>",
         f"{pad}{step}<GroupName>{library_name}</GroupName>",
         f"{pad}{step}<Files>",
     ]
 
-    for source_path in paths:
-        lines += _file_entry(source_path, pad + step + step, step)
+    for file_name, file_path in files:
+        lines += _file_entry(file_name, file_path, pad + step + step, step)
 
     lines += [f"{pad}{step}</Files>", f"{pad}</Group>"]
 
@@ -137,10 +140,17 @@ def integrate(uvprojx, library, destination, project_root):
     sep = _separator(text)
     paths = _file_paths(folder, library.build_sources, sep)
 
+    # The bare name comes from the manifest entry, which always uses forward
+    # slashes, and not from the path above. Path(r"..\demo\demo.c").name is
+    # demo.c on Windows, but the whole string on Linux and macOS, which do not
+    # split at a backslash.
+    files = list(zip((PurePosixPath(name).name for name in library.build_sources), paths))
+
     # A header only library has nothing to compile, so it gets an include path
     # and no group. An empty group would be added again on every run, since
     # there would be no file in the project to recognise it by.
-    wanted = paths and not any(f"<FilePath>{p}</FilePath>" in text for p in paths)
+    listed = {forward_slashes(match.group(1)) for match in FILE_PATH.finditer(text)}
+    wanted = paths and not any(forward_slashes(p) in listed for p in paths)
 
     updated = text
 
@@ -154,7 +164,7 @@ def integrate(uvprojx, library, destination, project_root):
             step = indent_step(outer, inner)
             at = insert_before(updated, container.start(3))
 
-            block = _group(library.name, paths, inner, step, newline)
+            block = _group(library.name, files, inner, step, newline)
 
             updated = updated[:at] + newline + block + updated[at:]
 
@@ -162,7 +172,8 @@ def integrate(uvprojx, library, destination, project_root):
 
     def add_include(match):
         parts = [p for p in match.group(2).split(";") if p.strip()]
-        parts += [d for d in directories if d not in parts]
+        present = {forward_slashes(p) for p in parts}
+        parts += [d for d in directories if forward_slashes(d) not in present]
 
         return match.group(1) + ";".join(parts) + match.group(3)
 

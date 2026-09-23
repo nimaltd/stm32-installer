@@ -31,7 +31,7 @@ To update it later, `pip install --upgrade stm32-installer`. To remove it, `pip 
 A library can need a newer installer than the one you have. It then says so and changes nothing:
 
 ```
-Error: This library needs stm32-installer 1.2.0 or newer, and this one is 1.1.0. Nothing was changed.
+Error: This library needs stm32-installer 1.2.0 or newer, and this one is 1.1.1. Nothing was changed.
 Update it with:
     pip install --upgrade stm32-installer
 ```

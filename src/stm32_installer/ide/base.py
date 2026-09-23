@@ -91,6 +91,18 @@ def relative(path, root):
         return Path(path).resolve().as_posix()
 
 
+def forward_slashes(path):
+    """
+    The path with every backslash made forward, for comparing two paths.
+
+    Keil and IAR read both slashes, and the one written here is whichever the
+    project already uses most. Files the user adds through the IDE can change
+    that, and then the library is in the project under the other slash. It is
+    still the same file, and an exact comparison would add it a second time.
+    """
+    return path.replace("\\", "/")
+
+
 def is_backup(path):
     """
     Whether this file is a copy an IDE or this installer left lying around.
