@@ -97,7 +97,13 @@ def strong(text):
 
 def banner(name, version, description=""):
     """The block printed before anything is written."""
-    lines = [f"{paint(name, BOLD, CYAN)} {paint(version, DIM)}"]
+    head = paint(name, BOLD, CYAN)
+
+    # A library whose header carries no @version simply shows none.
+    if version:
+        head += f" {paint(version, DIM)}"
+
+    lines = [head]
 
     if description:
         lines.append(note(description))

@@ -8,57 +8,166 @@ Every command below uses `example` as the library name. Put the real one in its 
 
 ---
 
-## For someone using a library
+## Installing a library
 
-Run either of these from the root of your STM32 project.
+There are three ways to run it. They all do the same thing, and they all take the same arguments.
 
-**You downloaded the repository into your project already:**
+### With pip
+
+Install the installer once. This needs internet:
 
 ```bash
-python example/install.py
+pip install https://github.com/nimaltd/stm32-installer/archive/refs/heads/main.zip
 ```
 
-Nothing is asked, and nothing is installed on your machine. The installer is fetched into a temporary folder, used, and deleted, so there are no packages and no stale copy to go out of date. Plain Python is all you need.
+Then, from the root of your STM32 project:
 
-The repository folder becomes the library folder: the header and source move to the top, your config file is created, and everything that belongs to the repository rather than your firmware is removed.
-
-**You have not downloaded anything:**
-
-Take `install.py` from the library you want. It knows which library it belongs to, so there is nothing else to say.
-
-**Windows, Command Prompt:**
-
-```bat
-curl -fsSL https://raw.githubusercontent.com/nimaltd/example/master/install.py -o install.py && python install.py
+```bash
+stm32-installer nimaltd/example
 ```
+
+To update the installer later, run the same `pip install` with `--upgrade`. To remove it, `pip uninstall stm32-installer`.
+
+A library can need a newer installer than the one you have. It then says so and changes nothing:
+
+```
+Error: This library needs stm32-installer 1.2.0 or newer, and this one is 1.1.0. Nothing was changed.
+Update it with:
+    pip install --upgrade https://github.com/nimaltd/stm32-installer/archive/refs/heads/main.zip
+```
+
+Run without pip, the installer is fetched fresh every time, so it is always the newest.
+
+### Without pip
+
+One line, straight from the web. Nothing is installed on your machine, and nothing is saved that you would have to delete afterwards.
 
 **Windows, PowerShell:**
 
 ```powershell
-irm https://raw.githubusercontent.com/nimaltd/example/master/install.py -OutFile install.py; python install.py
+irm https://raw.githubusercontent.com/nimaltd/stm32-installer/main/install.py | python - nimaltd/example
 ```
 
-PowerShell needs `irm` rather than `curl`, because `curl` there is an alias for a different command that does not understand those options.
+**Windows, Command Prompt:**
+
+```bat
+curl -fsSL https://raw.githubusercontent.com/nimaltd/stm32-installer/main/install.py | python - nimaltd/example
+```
 
 **Linux and macOS:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nimaltd/example/master/install.py -o install.py && python3 install.py
+curl -fsSL https://raw.githubusercontent.com/nimaltd/stm32-installer/main/install.py | python3 - nimaltd/example
 ```
 
-You are asked which folder to use. Only the files the library actually needs are downloaded, not the whole repository. Afterwards `install.py` deletes itself, so nothing is left lying in your project.
+The installer is fetched into a temporary folder, run, and deleted. Everything after the `-` goes to it, so a zip, a folder and every option below work here exactly as they do with the pip command.
 
-It stays if you gave it a library name, since then you are using it as a tool and probably have another one to install: `python install.py nimaltd/example`. It also stays if the install failed, so you can try again.
+PowerShell needs `irm` rather than `curl`, because `curl` there is an alias for a different command that does not understand those options.
 
-**Pinning a version.** By default you get the newest code on the library's default branch. Add `--ref` to hold a project on one release:
+### Without internet
+
+On any machine that has internet, download two zips, from the green **Code** button, **Download ZIP**: this repository, and the library. Copy both to the machine that has none, then from your project:
 
 ```bash
-python install.py --ref 2.0.0              # a tag
-python install.py --ref develop            # a branch
-python install.py --ref 00949e695e16       # an exact commit
+python stm32-installer-main/install.py D:/Downloads/example-master.zip
 ```
 
-It then registers the library with your IDE, and prints what it needs from your CubeMX setup.
+`install.py` sees the installer sitting beside it and runs that copy, so it never goes online.
+
+pip cannot do this on its own. Even given the zip, it goes online to fetch the tools it builds the package with.
+
+### What to install
+
+The one argument can be any of these:
+
+| You have | You type |
+|---|---|
+| Nothing yet, and internet | `stm32-installer nimaltd/example` |
+| The library's GitHub address | `stm32-installer https://github.com/nimaltd/example` |
+| The zip from GitHub's **Download ZIP** | `stm32-installer D:/Downloads/example-master.zip` |
+| That zip unpacked, anywhere on disk | `stm32-installer D:/Downloads/example-master` |
+| The library's folder, already inside your project | `stm32-installer example` |
+
+A bare name like `example` means `nimaltd/example` on GitHub, unless a folder of that name exists where you run it, in which case the folder is used. A path that does not exist is reported as missing rather than looked up on GitHub, so a typo in `D:/Downloads/...` gets a straight answer.
+
+The zip does not need unpacking first. If you did unpack it with Windows' **Extract All**, which puts `example-master` inside another `example-master`, either folder works.
+
+### Options
+
+| Option | What it does |
+|---|---|
+| `--ref 2.0.0` | A tag, a branch or a commit to take from GitHub. `master` when not given |
+| `--dir Libs/example` | The folder of your project to install into. Asked for when not given, with the library's name as the answer if you just press Enter |
+| `--project D:/Work/MyBoard` | Your project's root, when you are not running from it |
+| `--ide cubeide` | Register with this IDE only: `cmake`, `cubeide`, `keil` or `iar`. Every one found, when not given |
+
+`--ref` holds a project on one release, which is useful when you need exactly what you built with last time:
+
+```bash
+stm32-installer nimaltd/example --ref 2.0.0          # a tag
+stm32-installer nimaltd/example --ref develop        # a branch
+stm32-installer nimaltd/example --ref 00949e695e16   # an exact commit
+```
+
+### Where the files go
+
+**From GitHub, from a zip, or from a folder outside your project**, the files the library's `library.yml` lists are copied into a folder of your project. Nothing else comes with them, so the library's tests never reach your build. The zip or folder you gave is left exactly as it was.
+
+**A folder already inside your project** becomes the library where it stands. The header and source move to its top, your config file is created, and everything that belongs to the repository rather than your firmware is removed from it, the test folder above all. `--dir` does not apply here, since the folder is already where it is going. Rename it first if you want it called something else.
+
+### The folder question
+
+Without `--dir`, you are asked where the library should go:
+
+```
+Folder to install into [example]:
+```
+
+Press Enter for the default. Run the one line way, the question still reaches you: the answer is read from the console, because the installer itself is arriving on the input. In a script or on a build server, where nobody is there to answer, the default is taken without asking, rather than waiting for ever.
+
+### Updating a library
+
+Run the same command again. The code is replaced, and your `example_config.h` is kept, because it is yours:
+
+```
+Files
+  written example/example.h
+  written example/example.c
+  kept    example/example_config.h  not overwritten
+
+This was an update. Code replaced, your configuration kept.
+```
+
+### What you see
+
+A first install from a downloaded zip, into a CubeMX project that builds with both CMake and STM32CubeIDE:
+
+```
+Reading example-master.zip ...
+
+example 2.0.0
+What this library does, in one line
+middleware / system
+
+Files
+  written example/example.h
+  written example/example.c
+  written example/LICENSE.md
+  written example/NOTICE
+  written example/README.md
+  created example/example_config.h  yours to edit
+
+Project
+  updated CMake  Added example to CMakeLists.txt, linked to ${CMAKE_PROJECT_NAME}.
+          backup: CMakeLists.txt.20260923-193649.bak
+  updated STM32CubeIDE  Added example to the include path and source folders in .cproject.
+          Refresh the project in CubeIDE (F5) so it picks up the new files.
+          backup: .cproject.20260923-193649.bak
+
+Done. #include "example.h" and you are away.
+```
+
+The first line says where the library came from: `Fetching nimaltd/example ...` from GitHub, `Reading ...` from a zip or a folder. Run without pip, it starts with `Fetching the installer ...` first.
 
 ---
 
@@ -69,7 +178,7 @@ It then registers the library with your IDE, and prints what it needs from your 
 | IDE | What gets changed |
 |---|---|
 | CMake | The library gets its own `CMakeLists.txt`, and two lines are appended to yours |
-| STM32CubeIDE | The include path, in every build configuration in `.cproject` |
+| STM32CubeIDE | The include path, and the source folders where the project lists them, in every build configuration of `.cproject` |
 | Keil MDK 5 and 6 | A file group and the include path in `.uvprojx` |
 | IAR EWARM | A file group and the include path in `.ewp` |
 
@@ -94,7 +203,7 @@ The generated `example/CMakeLists.txt` declares an INTERFACE target, not a STATI
 
 **Edits the project, not a copy of it.** IAR leaves a `Backup of <name>.ewp` beside the real project when it upgrades one, and that copy is a valid project file whose name sorts first. The workspace file is asked which project is the real one, and backups are skipped.
 
-**Strips the repository scaffolding.** CubeIDE compiles every `.c` under your project, and a library repository ships a test suite with its own `main()`. Left in place, that breaks your build with an error that points nowhere useful.
+**Keeps the repository out of your build.** CubeIDE compiles every `.c` under your project, and a library repository ships a test suite with its own `main()`. Left in place, that breaks your build with an error that points nowhere useful. So only the listed files are copied, and a repository that sits inside your project has everything else removed from it.
 
 **Tells you what the library needs.** It reads your `stm32xxxx_hal_conf.h` and `.ioc` and warns before you hit a confusing compile error:
 
@@ -117,7 +226,6 @@ Put a `library.yml` at the root of the repository.
 
 ```yaml
 name: example
-version: 2.0.0
 description: What this library does, in one line
 repository: https://github.com/nimaltd/example
 license: Apache-2.0
@@ -129,6 +237,7 @@ category: system        # sensor, storage, display, communication, wireless,
 provides: []            # what this gives other libraries. An RTOS says [rtos]
 
 requires:
+  installer: 1.1.0      # the oldest stm32-installer that reads this file
   libraries: []         # other NimaLTD libraries, by name
   hal: true
   cmsis: true
@@ -148,7 +257,7 @@ install:
 
 files:
   headers:
-    - src/example.h
+    - src/example.h           # listed first: the one "#include" is printed for
     - src/port/*.h            # a wildcard, matched the way a shell would
   sources:
     - src/example.c
@@ -167,6 +276,17 @@ extras:                 # copied as they are, no compiling
   - docs                # a folder, copied whole and keeping its shape
 ```
 
+There is no `version` in it. The installer reads the version from the `@version` tag in the file comment of the first header listed, so it is written in the code and nowhere else:
+
+```c
+/**
+ * @file        example.h
+ * @version     2.0.0
+ */
+```
+
+`requires.installer` is the oldest stm32-installer that reads the file correctly. It is checked before anything else in the file is read, so when a manifest starts using something only a newer installer understands, raising this makes an older one stop with a message saying to update, rather than read the file wrongly without a word. Write it as three numbers, `1.1.0`: unquoted, YAML reads `1.10` as the decimal number `1.1`, and that is refused.
+
 A file listed under `once` is copied only when it is missing, so the user's own edits survive every update. It keeps its own name unless you give it a `to`.
 
 The key says what happens rather than what the file is. It is usually a configuration header, but the same rule fits a port layer someone fills in, or a table they tune: anything that is the library's to start and theirs from then on.
@@ -183,19 +303,9 @@ Three things about this that are easy to get wrong:
 
 **`LICENSE.md` and `NOTICE` travel with the code.** The Apache licence requires it, and the NOTICE file is what carries your attribution into someone else's product. They are never removed during cleanup.
 
-Then copy `install.py` in from this repository and set the three constants near the top:
+That is everything the repository needs. There is no installer script to copy in: put the install lines from the top of this page in your README, with your library's name in them.
 
-```python
-LIBRARY = "nimaltd/example"  # owner/name, so a fork under another account works
-BRANCH  = "master"           # the branch that library lives on
-
-# Where the installer itself comes from.
-SOURCE = "https://github.com/nimaltd/stm32-installer/archive/refs/heads/main.zip"
-```
-
-`LIBRARY` also accepts a full GitHub URL. It is what makes the one line install work: the file knows which library it belongs to, so whoever downloads it has nothing to type.
-
-That is all three of them. If you maintain your own libraries with this tool, point `SOURCE` at your own fork and the rest follows.
+If you maintain your own libraries with a fork of this tool, change `SOURCE` near the top of `install.py` in your fork to point at your fork, and use your fork's address in those lines.
 
 ---
 

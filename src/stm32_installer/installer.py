@@ -139,7 +139,7 @@ def install_to(library, destination, project_root=None):
     return result
 
 
-def install_in_place(library, cleanup=True):
+def install_in_place(library, cleanup=True, project_root=None):
     """
     Turn a downloaded repository into a usable library folder, where it sits.
 
@@ -150,6 +150,9 @@ def install_in_place(library, cleanup=True):
     Args:
         library: a Manifest, from manifest.load().
         cleanup: remove the repository scaffolding. Off only for testing.
+        project_root: where the record of the install goes. Defaults to the
+            folder holding the library, which is the project only when the
+            library sits at its top level rather than in, say, Libs/.
 
     Returns:
         A Result, with removed listing everything deleted.
@@ -159,7 +162,7 @@ def install_in_place(library, cleanup=True):
     if cleanup:
         _remove_scaffolding(library, result)
 
-    _record(library.root.parent, library, result)
+    _record(Path(project_root) if project_root is not None else library.root.parent, library, result)
 
     return result
 

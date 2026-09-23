@@ -1,33 +1,27 @@
 #!/usr/bin/env python3
 """
-Install a NimaLTD library into your STM32 project.
+Run stm32-installer without installing anything.
 
-Run it from the root of your project. It works two ways, depending on whether
-this file has a library sitting next to it.
+Straight from the web, from the root of your STM32 project:
 
-    python fsm/install.py
-        You downloaded this repository into your project, so the library is
-        already here. Nothing is asked. The repository folder becomes a plain
-        library folder: the header and source move to the top, your config file
-        is created, and everything belonging to the repository rather than your
-        firmware is removed.
+    PowerShell
+        irm https://raw.githubusercontent.com/nimaltd/stm32-installer/main/install.py | python - nimaltd/example
 
-        That last part matters. STM32CubeIDE compiles every .c file under your
-        project, and this repository ships a test suite with its own main(),
-        which would break your build.
+    Command Prompt, Linux, macOS (python3 on the last two)
+        curl -fsSL https://raw.githubusercontent.com/nimaltd/stm32-installer/main/install.py | python - nimaltd/example
 
-    python install.py nimaltd/fsm
-        This copy is not tied to any library, so it takes the address. The copy
-        in a library's own repository knows its own and needs no argument.
+Everything after the "-" goes to the installer, so this takes whatever the
+stm32-installer command takes: a library name, "owner/name", a GitHub URL, a
+downloaded .zip or a folder, and the same options, --ref included.
 
-        python install.py nimaltd/spif --ref 1.20.0    a released version
+The installer is fetched into a temporary folder, run, and deleted. Nothing is
+installed on your machine, and nothing but the library lands in your project.
 
-Your own <library>_config.h is never overwritten, so either form is also how you
-update.
+Kept beside the installer's own src folder, as it is in a download of this
+repository, it runs that copy instead of fetching one, so it works with no
+network at all:
 
-Nothing is installed on your machine. The installer itself is fetched into a
-temporary folder, used, and deleted. No pip, no packages, no leftovers, and you
-always get the current version because there is never an old one lying around.
+    python stm32-installer-main/install.py D:/Downloads/example-master.zip
 """
 
 import io
@@ -40,25 +34,56 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-# Which library this copy installs when it is downloaded on its own, away from
-# its repository, and which branch to take it from.
-#
-# Written as "owner/name" rather than a bare name so that a fork under someone
-# else's account works by changing this one line. A full GitHub URL works too.
-# The copy in the stm32-installer repository leaves LIBRARY as None, because
-# that one is not tied to any particular library.
-LIBRARY = None
-BRANCH = "master"
-
-# Where the installer itself comes from. Anyone maintaining their own libraries
-# with this tool points these at their own repositories and changes nothing else.
+# Where the installer comes from. Anyone maintaining their own libraries with
+# this tool points this at their own fork and changes nothing else.
 SOURCE = "https://github.com/nimaltd/stm32-installer/archive/refs/heads/main.zip"
 
 MODULE = "stm32_installer"
-MANIFEST = "library.yml"
 TIMEOUT_SECONDS = 30
 
-HERE = Path(__file__).resolve().parent
+USAGE = """\
+Say what to install, for example:
+
+    python install.py nimaltd/example
+    python install.py D:/Downloads/example-master.zip
+
+or pipe this file into Python from the web, as the stm32-installer README shows.
+"""
+
+
+def here():
+    """
+    The folder this file sits in, or None when it has none.
+
+    Piped into Python there is no file: __file__ reads "<stdin>", and on Windows
+    that name is not even a legal path.
+    """
+    try:
+        path = Path(__file__)
+        return path.resolve().parent if path.is_file() else None
+    except (NameError, OSError):
+        return None
+
+
+def load(extra_path=None):
+    """Import the installer, optionally from a folder put first on the path."""
+    if extra_path is not None and str(extra_path) not in sys.path:
+        sys.path.insert(0, str(extra_path))
+
+    try:
+        return __import__(MODULE)
+    except ImportError:
+        return None
+
+
+def load_beside():
+    """The installer from a src folder next to this file, when there is one."""
+    folder = here()
+
+    if folder is None or not (folder / "src" / MODULE).is_dir():
+        return None
+
+    return load(folder / "src")
 
 
 def fetch_to(folder):
@@ -91,24 +116,13 @@ def fetch_to(folder):
     return found[0]
 
 
-def load(extra_path=None):
-    """Import the installer, optionally from a folder added to the path first."""
-    if extra_path is not None and str(extra_path) not in sys.path:
-        sys.path.insert(0, str(extra_path))
-
-    try:
-        return __import__(MODULE)
-    except ImportError:
-        return None
-
-
 def install_with_pip():
     """
-    Last resort: let pip do it, which also pulls in anything else that is needed.
+    Last resort: let pip fetch it.
 
-    The installer is written to need nothing but Python, so this should never be
-    reached. It is here so a missing package is something this solves rather
-    than something it asks you to go and fix.
+    Worth having for one reason. pip carries its own certificates and honours
+    proxy settings, so on a network where Python's own download fails, pip often
+    still gets through.
     """
     print("Falling back to pip ...", flush=True)
 
@@ -124,13 +138,17 @@ def install_with_pip():
 
 def get_installer(staging):
     """The installer module, however it can be got hold of."""
+    installer = load_beside()
+
+    if installer is not None:
+        return installer
+
     print("Fetching the installer ...", flush=True)
 
     installer = load(fetch_to(staging))
 
     if installer is None:
-        # An already installed copy, for a machine that is offline but has had
-        # the installer put there some other way.
+        # A copy installed with pip, for a machine that cannot reach GitHub.
         installer = load()
 
     if installer is None:
@@ -139,70 +157,11 @@ def get_installer(staging):
     return installer
 
 
-# Options that swallow the argument after them. Without this, the "v2.0.0" in
-# "--ref v2.0.0" reads as a library name and the wrong thing gets installed.
-VALUE_OPTIONS = ("--ref", "--dir", "--project", "--local", "--ide")
-
-
-def _library_names(argv):
-    """The arguments that actually name a library, ignoring options and values."""
-    names = []
-    skip = False
-
-    for arg in argv:
-        if skip:
-            skip = False
-            continue
-
-        if arg.startswith("-"):
-            skip = arg in VALUE_OPTIONS
-            continue
-
-        names.append(arg)
-
-    return names
-
-
-def remove_self():
-    """
-    Delete this file once it has finished.
-
-    Python reads the whole script before running it and closes the file, so this
-    is safe even on Windows, where a file in use normally cannot be deleted.
-    """
-    try:
-        Path(__file__).resolve().unlink()
-        print(f"Removed {Path(__file__).name}, it has done its job.")
-    except OSError:
-        # Not worth failing an install that already succeeded.
-        pass
-
-
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
 
-    # Options are not a library name. "--ref v2.0.0" still means "the library
-    # this copy belongs to", just at a different version.
-    named = _library_names(argv)
-    beside_a_library = (HERE / MANIFEST).is_file()
-
-    # Downloaded on its own, with no library named. This copy knows which one it
-    # came from, which is what makes the one line command work.
-    if not beside_a_library and not named and LIBRARY:
-        argv = [LIBRARY] + argv
-
-        # Only when the caller has not chosen a version of their own.
-        if "--ref" not in argv:
-            argv += ["--ref", BRANCH]
-
-    if not beside_a_library and not argv:
-        print(
-            f"There is no {MANIFEST} next to this file, so there is no library here "
-            "to install.\n"
-            "Say which one you want, for example:\n\n"
-            f"    python {Path(__file__).name} fsm\n",
-            file=sys.stderr,
-        )
+    if not argv:
+        print(USAGE, file=sys.stderr)
         return 2
 
     staging = Path(tempfile.mkdtemp(prefix="stm32-install-"))
@@ -218,18 +177,7 @@ def main(argv=None):
             )
             return 2
 
-        if beside_a_library and not named:
-            return installer.main(library_root=HERE)
-
-        code = installer.main(argv=argv)
-
-        # A copy downloaded on its own has done its job and would only be
-        # clutter in the project from here on. One that was given a library to
-        # install is being used as a tool, so it stays for the next one.
-        if code == 0 and not named:
-            remove_self()
-
-        return code
+        return installer.main(argv=argv)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 

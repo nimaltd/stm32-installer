@@ -22,14 +22,17 @@ classifiers = [
     "Topic :: Software Development :: Embedded Systems",
 ]
 
-dependencies = ["PyYAML>=5.1"]
+# None. PyYAML is used when it happens to be installed, and a reader built
+# into the package handles library.yml otherwise. Requiring it would make
+# pip go online for it, which is exactly what an offline install cannot do.
+dependencies = []
 
 [project.urls]
 Homepage = "https://github.com/nimaltd/stm32-installer"
 Issues = "https://github.com/nimaltd/stm32-installer/issues"
 
 [project.scripts]
-stm32-install = "stm32_installer.cli:main"
+stm32-installer = "stm32_installer.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

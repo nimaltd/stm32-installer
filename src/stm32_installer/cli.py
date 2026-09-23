@@ -1,25 +1,41 @@
 """
 The command line front end.
 
-Two ways in, and they behave differently on purpose.
+One argument says what to install, and it can be any of these:
 
-Local: the user downloaded a library repository into their project and runs its
-install.py. The destination is already decided, it is that folder, so nothing is
-asked. The repository scaffolding is stripped so the IDE does not try to compile
-the test harness.
+    stm32-installer nimaltd/example                    GitHub, by owner and name
+    stm32-installer example                            GitHub, owner nimaltd
+    stm32-installer https://github.com/nimaltd/example GitHub, by address
+    stm32-installer D:/Downloads/example-master.zip    the zip GitHub hands out
+    stm32-installer D:/Downloads/example-master        a folder anywhere on disk
+    stm32-installer example                            a folder already in the project
 
-Online: the user ran the one line command from a README. Nothing is on disk yet,
-so the folder is asked for, then only the files the manifest lists are fetched.
+A path that exists always wins over a name, so a folder called "example" in the
+project is used as it is and never confused with the repository of that name.
+
+Where the library comes from decides what happens to it:
+
+- From GitHub, from a zip, or from a folder outside the project, the files the
+  manifest lists are copied into a folder of the project, asked for or given with
+  --dir. The source is never changed.
+- A folder already inside the project becomes the library where it stands. The
+  repository scaffolding is removed from it, because STM32CubeIDE compiles every
+  .c under the project and a test harness brings a second main() with it.
 
 Either way the work happens in the same order: check the project against what the
 library needs, copy the files, then register them with whatever IDE is found.
 """
 
 import argparse
+import os
+import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from . import checks, console, download, ide, installer, manifest
+
+# A drive letter, as in D:/Downloads or C:\Users.
+_DRIVE = re.compile(r"^[A-Za-z]:")
 
 
 def _header(library):
@@ -32,10 +48,13 @@ def _header(library):
 
 def _ask_folder(default):
     """
-    Ask where the library should go.
+    Ask where the library should go, or take the default when nobody can answer.
 
-    Falls back to reading the console directly, because the online form pipes a
-    script into a shell and stdin is already busy carrying that script.
+    Piped into Python, the installer arrives on stdin, so stdin cannot also carry
+    the answer. The console is read directly instead: /dev/tty on Linux and
+    macOS, CONIN$ on Windows. That is only tried when the output is going to a
+    screen. Otherwise nobody is there to read the question, and waiting for an
+    answer would hang a script or a build server for ever.
     """
     prompt = console.strong(f"Folder to install into [{default}]: ")
 
@@ -43,10 +62,15 @@ def _ask_folder(default):
         if sys.stdin is not None and sys.stdin.isatty():
             return input(prompt).strip() or default
 
-        with open("/dev/tty", "r") as tty:
+        if sys.stdout is None or not sys.stdout.isatty():
+            return default
+
+        device = "CONIN$" if os.name == "nt" else "/dev/tty"
+
+        with open(device, "r") as terminal:
             print(prompt, end="", flush=True)
-            return tty.readline().strip() or default
-    except (OSError, EOFError, KeyboardInterrupt):
+            return terminal.readline().strip() or default
+    except (OSError, EOFError):
         return default
 
 
@@ -118,12 +142,43 @@ def _print_ide(outcomes):
             print(f"          {console.note('backup: ' + outcome.backup.name)}")
 
 
+def _include_name(library):
+    """
+    What goes between the quotes of the #include for this library.
+
+    The first header the manifest lists, relative to the include folder it sits
+    in. Not the library's name with .h added: the sequencer library's header is
+    seq.h, and telling people to include sequencer.h sends them looking for a
+    file that does not exist.
+    """
+    if not library.headers:
+        return None
+
+    landed = PurePosixPath(library.headers[0].destination)
+
+    for folder in sorted(library.include_dirs, key=len, reverse=True):
+        if folder in (".", ""):
+            continue
+
+        try:
+            return landed.relative_to(folder).as_posix()
+        except ValueError:
+            continue
+
+    return landed.as_posix()
+
+
 def _print_next(result, root, library):
     """The last word, which is the one people actually read."""
     folder = _show(result.destination, root)
+    header = _include_name(library)
 
     print()
-    print(console.good(f'Done. #include "{library.name}.h" and you are away.'))
+
+    if header:
+        print(console.good(f'Done. #include "{header}" and you are away.'))
+    else:
+        print(console.good("Done."))
 
     if result.was_update:
         print(console.note("This was an update. Code replaced, your configuration kept."))
@@ -131,7 +186,7 @@ def _print_next(result, root, library):
     if library.requires.libraries:
         print()
         print(console.warn("This library also needs: " + ", ".join(library.requires.libraries)))
-        print(console.note(f"  Install each of them the same way."))
+        print(console.note("  Install each of them the same way."))
 
     for warning in getattr(library, "warnings", []):
         print(console.note(f"  manifest: {warning}"))
@@ -148,7 +203,7 @@ def _show(path, root):
 
 
 def _finish(library, result, project_root, only_ide):
-    """The part shared by both install routes."""
+    """The part shared by every install route."""
     _print_files(result, project_root)
 
     outcomes = ide.integrate(project_root, library, result.destination, only=only_ide)
@@ -158,10 +213,69 @@ def _finish(library, result, project_root, only_ide):
     return 0
 
 
-def _install_local(library_root, only_ide=None):
-    """Flatten a repository that already sits inside the user's project."""
-    library_root = Path(library_root).resolve()
-    project_root = library_root.parent
+def _looks_like_path(text):
+    """
+    Whether the argument can only be a path, never a library name.
+
+    A path that does not exist is then reported as missing, rather than sent to
+    GitHub, where a mistyped D:/Downloads/example.zip would come back as a
+    baffling "repository not found" for an owner called "D:".
+    """
+    return (
+        text.lower().endswith(".zip")
+        or "\\" in text
+        or text.startswith((".", "/", "~"))
+        or bool(_DRIVE.match(text))
+        or (not text.startswith(("http://", "https://")) and text.count("/") > 1)
+    )
+
+
+def _kind(path):
+    """
+    What is on disk at path: "zip", "file", "folder", or None for nothing.
+
+    Never raises. A string that only looks like a path, or holds a character
+    Windows refuses in a file name, is simply not there.
+    """
+    try:
+        if path.is_dir():
+            return "folder"
+
+        if path.is_file():
+            return "zip" if path.suffix.lower() == ".zip" else "file"
+    except OSError:
+        pass
+
+    return None
+
+
+def _inside(path, root):
+    """
+    Whether path is strictly inside root.
+
+    Written out rather than Path.is_relative_to, which only arrived in Python
+    3.9, and this still runs on 3.8.
+    """
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+
+    return path != root
+
+
+def _install_in_place(library_root, project_root, folder, only_ide):
+    """Turn a library folder that already sits in the project into the library."""
+    if folder:
+        print(
+            console.bad(
+                f"Error: {_show(library_root, project_root)} is already in the project, "
+                "so it becomes the library where it is and --dir has nothing to do.\n"
+                "Rename the folder instead, or install from a copy outside the project."
+            ),
+            file=sys.stderr,
+        )
+        return 2
 
     try:
         library = manifest.load(library_root)
@@ -169,13 +283,12 @@ def _install_local(library_root, only_ide=None):
         # Installing removes library.yml, so the most likely reason it is
         # missing is that this folder has already been installed once.
         known = installer.installed_libraries(project_root)
-        already = next(
-            (n for n, d in known.items() if d.get("folder") == library_root.name), None
-        )
+        where = _show(library_root, project_root)
+        already = next((n for n, d in known.items() if d.get("folder") == where), None)
 
         if already:
-            print(console.warn(f"{already} is already installed in {library_root.name}."))
-            print(console.note("  To update it, download the repository again and rerun this."))
+            print(console.warn(f"{already} is already installed in {where}."))
+            print(console.note("  To update it, run this again with a fresh download."))
             return 0
 
         print(console.bad(f"Error: {error}"), file=sys.stderr)
@@ -185,7 +298,7 @@ def _install_local(library_root, only_ide=None):
     _print_requirements(checks.check(library, project_root))
 
     try:
-        result = installer.install_in_place(library)
+        result = installer.install_in_place(library, project_root=project_root)
     except installer.InstallError as error:
         print(console.bad(f"Error: {error}"), file=sys.stderr)
         return 2
@@ -193,18 +306,16 @@ def _install_local(library_root, only_ide=None):
     return _finish(library, result, project_root, only_ide)
 
 
-def _install_online(source, ref, folder, project_root, only_ide=None):
-    """Download a library and install it into a folder the user chooses."""
-    print(console.note(f"Fetching {source} ..."))
+def _install_copy(library_root, project_root, folder, only_ide, staging=None):
+    """
+    Copy a library from wherever it is into a folder of the project.
 
+    staging is a temporary folder this call owns and removes when done: the
+    download, or the unpacked zip. A folder the user pointed at is never passed
+    as staging, so it is never touched.
+    """
     try:
-        staged = download.fetch(source, ref=ref)
-    except download.DownloadError as error:
-        print(console.bad(f"Error: {error}"), file=sys.stderr)
-        return 2
-
-    try:
-        library = manifest.load(staged)
+        library = manifest.load(library_root)
 
         print()
         print(_header(library))
@@ -217,15 +328,107 @@ def _install_online(source, ref, folder, project_root, only_ide=None):
         print(console.bad(f"Error: {error}"), file=sys.stderr)
         return 2
     finally:
-        download.cleanup(staged)
+        if staging is not None:
+            download.cleanup(staging)
 
     return _finish(library, result, project_root, only_ide)
+
+
+def _install_folder(folder, project_root, dir_name, only_ide):
+    """A library folder on disk: converted where it is, or copied in."""
+    folder = folder.resolve()
+    root = download.find_root(folder) or folder
+
+    # Run from inside the library folder itself, which is what an install.py from
+    # an older release does. The folder is the library and its parent the project.
+    if root == project_root:
+        return _install_in_place(root, root.parent, dir_name, only_ide)
+
+    if _inside(root, project_root):
+        return _install_in_place(root, project_root, dir_name, only_ide)
+
+    print(console.note(f"Reading {folder.as_posix()} ..."))
+
+    return _install_copy(root, project_root, dir_name, only_ide)
+
+
+def _install_zip(archive, project_root, dir_name, only_ide):
+    """The zip GitHub hands out, installed without being unpacked by hand."""
+    print(console.note(f"Reading {archive.name} ..."))
+
+    try:
+        staging, root = download.unpack(archive)
+    except download.DownloadError as error:
+        print(console.bad(f"Error: {error}"), file=sys.stderr)
+        return 2
+
+    return _install_copy(root, project_root, dir_name, only_ide, staging=staging)
+
+
+def _install_online(source, ref, dir_name, project_root, only_ide):
+    """Download a library and copy it into the project."""
+    print(console.note(f"Fetching {source} ..."))
+
+    try:
+        staged = download.fetch(source, ref=ref)
+    except download.DownloadError as error:
+        print(console.bad(f"Error: {error}"), file=sys.stderr)
+        return 2
+
+    return _install_copy(staged, project_root, dir_name, only_ide, staging=staged)
+
+
+def _run(args, parser, library_root):
+    """Route the arguments to the install that fits them."""
+    project_root = Path(args.project).resolve() if args.project else Path.cwd().resolve()
+
+    # An install.py from an older release passes the folder it sits in.
+    if library_root is not None:
+        return _install_folder(Path(library_root), project_root, args.folder, args.ide)
+
+    target = args.local or args.library
+
+    if not target:
+        parser.print_help()
+        print(
+            console.bad(
+                "\nError: say what to install, for example: stm32-installer nimaltd/example"
+            ),
+            file=sys.stderr,
+        )
+        return 2
+
+    if not target.startswith(("http://", "https://")):
+        local = Path(target).expanduser()
+        kind = _kind(local)
+
+        if kind == "zip":
+            return _install_zip(local.resolve(), project_root, args.folder, args.ide)
+
+        if kind == "folder":
+            return _install_folder(local, project_root, args.folder, args.ide)
+
+        if kind == "file":
+            print(
+                console.bad(
+                    f"Error: {target} is not a .zip. Give the zip GitHub offers under "
+                    "Code, Download ZIP, or the folder it unpacks to."
+                ),
+                file=sys.stderr,
+            )
+            return 2
+
+        if args.local or _looks_like_path(target):
+            print(console.bad(f"Error: {target} does not exist."), file=sys.stderr)
+            return 2
+
+    return _install_online(target, args.ref, args.folder, project_root, args.ide)
 
 
 def main(argv=None, library_root=None):
     """Entry point. Returns a process exit code."""
     parser = argparse.ArgumentParser(
-        prog="stm32-install",
+        prog="stm32-installer",
         description="Install a NimaLTD library into an STM32 project.",
         epilog="Run this from the root of your STM32 project.",
     )
@@ -233,16 +436,17 @@ def main(argv=None, library_root=None):
         "library",
         nargs="?",
         default=None,
-        help='what to install, for example "fsm", "nimaltd/fsm", or a GitHub URL.',
+        help='what to install: a name like "nimaltd/example", a GitHub URL, '
+        "a downloaded .zip, or a folder.",
     )
-    parser.add_argument("--ref", default="master", help="branch or tag to fetch. Default master.")
+    parser.add_argument("--ref", default="master", help="branch, tag or commit to fetch. Default master.")
     parser.add_argument("--dir", dest="folder", default=None, help="folder to install into.")
     parser.add_argument(
         "--project", default=None, help="root of your STM32 project. Defaults to this folder."
     )
-    parser.add_argument(
-        "--local", default=None, help="install from a library folder already on disk."
-    )
+    # Before a folder could be given as the plain argument, it took this option.
+    # Kept working for anyone who still types it, but no longer advertised.
+    parser.add_argument("--local", default=None, help=argparse.SUPPRESS)
     parser.add_argument(
         "--ide",
         default=None,
@@ -252,25 +456,13 @@ def main(argv=None, library_root=None):
 
     args = parser.parse_args(argv)
 
-    project_root = Path(args.project).resolve() if args.project else Path.cwd().resolve()
-
-    # install.py inside a repository passes its own folder, which means the
-    # library is already where it belongs and nothing needs to be asked.
-    if library_root is not None:
-        return _install_local(library_root, args.ide)
-
-    if args.local:
-        return _install_local(args.local, args.ide)
-
-    if not args.library:
-        parser.print_help()
-        print(
-            console.bad("\nError: say which library to install, for example: stm32-install fsm"),
-            file=sys.stderr,
-        )
-        return 2
-
-    return _install_online(args.library, args.ref, args.folder, project_root, args.ide)
+    try:
+        return _run(args, parser, library_root)
+    except KeyboardInterrupt:
+        # Ctrl+C at the folder question used to mean "take the default" and go
+        # ahead with the install. It means stop.
+        print(console.warn("\nCancelled."), file=sys.stderr)
+        return 130
 
 
 if __name__ == "__main__":

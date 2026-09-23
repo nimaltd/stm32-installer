@@ -11,6 +11,7 @@ declares its kind, and declares what it provides, and another library's
 requirement is then satisfied by whatever provides that thing.
 """
 
+import re
 from pathlib import Path, PurePosixPath
 
 from . import yamlreader
@@ -56,6 +57,75 @@ RTOS_CHOICES = (
 
 class ManifestError(Exception):
     """A manifest is missing, unreadable, or does not describe a usable library."""
+
+
+# Where a library's version lives: the @version tag in its header's file comment.
+_VERSION_TAG = re.compile(r"@version\s+(\S+)")
+
+UPDATE_COMMAND = (
+    "pip install --upgrade https://github.com/nimaltd/stm32-installer/archive/refs/heads/main.zip"
+)
+
+
+def _version_tuple(text):
+    """(1, 2, 0) from "1.2.0", or None when it is not three whole numbers."""
+    parts = str(text).strip().split(".")
+
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        return None
+
+    return tuple(int(part) for part in parts)
+
+
+def check_installer(data):
+    """
+    Refuse a manifest written for a newer installer than this one.
+
+    Called before anything else in the file is read. A manifest that needs a
+    newer installer may use something this one does not understand, and reading
+    it wrongly without a word is worse than stopping with the way forward.
+
+    Raises:
+        ManifestError, naming the version needed and how to update.
+    """
+    from . import __version__
+
+    requires = data.get("requires")
+
+    if not isinstance(requires, dict) or requires.get("installer") is None:
+        return
+
+    wanted = _version_tuple(requires["installer"])
+
+    if wanted is None:
+        raise ManifestError(
+            f"requires.installer is {requires['installer']!r}. Write it as three numbers, "
+            "like 1.1.0. YAML reads an unquoted 1.10 as the decimal number 1.1."
+        )
+
+    have = _version_tuple(__version__) or (0, 0, 0)
+
+    if wanted > have:
+        needed = ".".join(str(part) for part in wanted)
+        raise ManifestError(
+            f"This library needs stm32-installer {needed} or newer, and this one is "
+            f"{__version__}. Nothing was changed.\n"
+            f"Update it with:\n    {UPDATE_COMMAND}"
+        )
+
+
+def _header_version(root, headers):
+    """The @version tag in the first header's file comment, or None."""
+    if not headers:
+        return None
+
+    try:
+        with open(Path(root) / headers[0].source, encoding="utf-8", errors="replace") as handle:
+            found = _VERSION_TAG.search(handle.read(4096))
+    except OSError:
+        return None
+
+    return found.group(1) if found else None
 
 
 # How files are laid out inside the folder they are installed into.
@@ -265,7 +335,6 @@ class Manifest:
     def __init__(self, root, data, known=None):
         self.root = Path(root)
         self.name = data["name"]
-        self.version = str(data.get("version", "0.0.0"))
         self.description = data.get("description", "")
         self.repository = data.get("repository", "")
         self.license = data.get("license", "")
@@ -287,6 +356,15 @@ class Manifest:
         files = data["files"]
         self.headers = _entries(self.root, files.get("headers"), self.layout, known)
         self.sources = _entries(self.root, files.get("sources"), self.layout, known)
+
+        # The version lives in the code, in the @version tag of the first
+        # header's file comment, so it cannot drift from what it describes. A
+        # version written in library.yml is only a fallback, for a header that
+        # does not carry one.
+        declared = data.get("version")
+        self.version = _header_version(self.root, self.headers) or (
+            str(declared) if declared is not None else ""
+        )
         # "to" is optional. The file normally keeps its own name, and saying
         # it twice would only be one more thing to get out of step.
         self.once = [
@@ -458,6 +536,10 @@ def load(library_root, strict=False, known=None):
 
     if not isinstance(data, dict):
         raise ManifestError(f"{path} should hold a mapping of settings, not a bare value.")
+
+    # Before anything else is read, since a manifest for a newer installer may
+    # not even have the fields this one expects.
+    check_installer(data)
 
     for key in ("name", "files"):
         if key not in data:

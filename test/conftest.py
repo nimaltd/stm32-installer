@@ -60,12 +60,15 @@ def library(tmp_path):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(text, encoding="utf-8")
 
-        data = {
-            "name": name,
-            "version": version,
-            "kind": kind,
-            "files": {"headers": list(headers), "sources": list(sources)},
-        }
+        data = {"name": name}
+
+        # None leaves the key out entirely, the way a library.yml looks now that
+        # the version is read from the header instead.
+        if version is not None:
+            data["version"] = version
+
+        data["kind"] = kind
+        data["files"] = {"headers": list(headers), "sources": list(sources)}
 
         if once:
             data["once"] = once
