@@ -17,7 +17,7 @@ There are three ways to run it. They all do the same thing, and they all take th
 Install the installer once. This needs internet:
 
 ```bash
-pip install https://github.com/nimaltd/stm32-installer/archive/refs/heads/main.zip
+pip install stm32-installer
 ```
 
 Then, from the root of your STM32 project:
@@ -26,14 +26,14 @@ Then, from the root of your STM32 project:
 stm32-installer nimaltd/example
 ```
 
-To update the installer later, run the same `pip install` with `--upgrade`. To remove it, `pip uninstall stm32-installer`.
+To update it later, `pip install --upgrade stm32-installer`. To remove it, `pip uninstall stm32-installer`.
 
 A library can need a newer installer than the one you have. It then says so and changes nothing:
 
 ```
 Error: This library needs stm32-installer 1.2.0 or newer, and this one is 1.1.0. Nothing was changed.
 Update it with:
-    pip install --upgrade https://github.com/nimaltd/stm32-installer/archive/refs/heads/main.zip
+    pip install --upgrade stm32-installer
 ```
 
 Run without pip, the installer is fetched fresh every time, so it is always the newest.
@@ -319,4 +319,4 @@ python test/run_tests.py
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE).
+Apache License 2.0. See [LICENSE](https://github.com/nimaltd/stm32-installer/blob/main/LICENSE).

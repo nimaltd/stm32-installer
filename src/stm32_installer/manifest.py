@@ -62,9 +62,7 @@ class ManifestError(Exception):
 # Where a library's version lives: the @version tag in its header's file comment.
 _VERSION_TAG = re.compile(r"@version\s+(\S+)")
 
-UPDATE_COMMAND = (
-    "pip install --upgrade https://github.com/nimaltd/stm32-installer/archive/refs/heads/main.zip"
-)
+UPDATE_COMMAND = "pip install --upgrade stm32-installer"
 
 
 def _version_tuple(text):

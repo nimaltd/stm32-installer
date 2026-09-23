@@ -1,5 +1,6 @@
 [build-system]
-requires = ["setuptools>=64"]
+# 77 is the first that reads license = "Apache-2.0" as text. 76 refuses it.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
