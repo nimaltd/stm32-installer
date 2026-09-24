@@ -10,10 +10,6 @@ Every command below uses `example` as the library name. Put the real one in its 
 
 ## Installing a library
 
-There are three ways to run it. They all do the same thing, and they all take the same arguments.
-
-### With pip
-
 Install the installer once. This needs internet:
 
 ```bash
@@ -28,6 +24,8 @@ stm32-installer nimaltd/example
 
 To update it later, `pip install --upgrade stm32-installer`. To remove it, `pip uninstall stm32-installer`.
 
+On Linux or macOS, if pip refuses with `externally-managed-environment`, use `pipx install stm32-installer` instead, and `pipx upgrade stm32-installer` to update.
+
 A library can need a newer installer than the one you have. It then says so and changes nothing:
 
 ```
@@ -36,45 +34,22 @@ Update it with:
     pip install --upgrade stm32-installer
 ```
 
-Run without pip, the installer is fetched fresh every time, so it is always the newest.
-
-### Without pip
-
-One line, straight from the web. Nothing is installed on your machine, and nothing is saved that you would have to delete afterwards.
-
-**Windows, PowerShell:**
-
-```powershell
-irm https://raw.githubusercontent.com/nimaltd/stm32-installer/main/install.py | python - nimaltd/example
-```
-
-**Windows, Command Prompt:**
-
-```bat
-curl -fsSL https://raw.githubusercontent.com/nimaltd/stm32-installer/main/install.py | python - nimaltd/example
-```
-
-**Linux and macOS:**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/nimaltd/stm32-installer/main/install.py | python3 - nimaltd/example
-```
-
-The installer is fetched into a temporary folder, run, and deleted. Everything after the `-` goes to it, so a zip, a folder and every option below work here exactly as they do with the pip command.
-
-PowerShell needs `irm` rather than `curl`, because `curl` there is an alias for a different command that does not understand those options.
-
 ### Without internet
 
-On any machine that has internet, download two zips, from the green **Code** button, **Download ZIP**: this repository, and the library. Copy both to the machine that has none, then from your project:
+On a machine that has internet, save the installer as a file:
 
 ```bash
-python stm32-installer-main/install.py D:/Downloads/example-master.zip
+pip download stm32-installer
 ```
 
-`install.py` sees the installer sitting beside it and runs that copy, so it never goes online.
+That saves one file, such as `stm32_installer-1.1.2-py3-none-any.whl`, where the number is the installer's version. Download the library too, from the green **Code** button, **Download ZIP**. Copy both to the machine that has no internet, then from your project:
 
-pip cannot do this on its own. Even given the zip, it goes online to fetch the tools it builds the package with.
+```bash
+pip install stm32_installer-1.1.2-py3-none-any.whl
+stm32-installer D:/Downloads/example-master.zip
+```
+
+Neither line needs the internet. The installer needs nothing but itself, and the library comes from the zip.
 
 ### What to install
 
@@ -123,7 +98,7 @@ Without `--dir`, you are asked where the library should go:
 Folder to install into [example]:
 ```
 
-Press Enter for the default. Run the one line way, the question still reaches you: the answer is read from the console, because the installer itself is arriving on the input. In a script or on a build server, where nobody is there to answer, the default is taken without asking, rather than waiting for ever.
+Press Enter for the default. In a script or on a build server, where nobody is there to answer, the default is taken without asking, rather than waiting for ever.
 
 ### Updating a library
 
@@ -167,7 +142,7 @@ Project
 Done. #include "example.h" and you are away.
 ```
 
-The first line says where the library came from: `Fetching nimaltd/example ...` from GitHub, `Reading ...` from a zip or a folder. Run without pip, it starts with `Fetching the installer ...` first.
+The first line says where the library came from: `Fetching nimaltd/example ...` from GitHub, `Reading ...` from a zip or a folder.
 
 ---
 
@@ -304,8 +279,6 @@ Three things about this that are easy to get wrong:
 **`LICENSE.md` and `NOTICE` travel with the code.** The Apache licence requires it, and the NOTICE file is what carries your attribution into someone else's product. They are never removed during cleanup.
 
 That is everything the repository needs. There is no installer script to copy in: put the install lines from the top of this page in your README, with your library's name in them.
-
-If you maintain your own libraries with a fork of this tool, change `SOURCE` near the top of `install.py` in your fork to point at your fork, and use your fork's address in those lines.
 
 ---
 

@@ -1,9 +1,9 @@
 """
 A reader for the slice of YAML that library.yml actually uses.
 
-PyYAML is used whenever it is installed. This exists so the installer can run on
-a machine with nothing but Python, which is what lets install.py download and run
-it without pip installing anything at all.
+PyYAML is used whenever it is installed. This exists so the installer needs
+nothing but Python. pip then has nothing to fetch besides the installer itself,
+which is what lets its wheel be installed on a machine with no internet.
 
 What is supported, which is everything the manifest format uses:
 
