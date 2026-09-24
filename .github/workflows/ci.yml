@@ -47,8 +47,26 @@ jobs:
           python -m pip install --upgrade build twine
           python -m build
 
-      # The metadata has to be valid for pip to install this from the GitHub
-      # archive, and a broken pyproject.toml fails at the worst moment: on a
-      # user's machine, part way through installing a library.
+      # The metadata has to be valid for pip to install this, and a broken
+      # pyproject.toml fails at the worst moment: on a user's machine, part way
+      # through installing a library.
       - name: Check
         run: python -m twine check dist/*
+
+      # What was built, installed the way a user gets it and then started, from
+      # outside the checkout so the source tree cannot stand in for it. A module
+      # left out of the package, or a broken entry point, fails here and not on
+      # someone's machine. --no-index because it has to need nothing else, and
+      # python -m because that is what the README offers when the command is
+      # not on the PATH.
+      - name: Run what was built
+        working-directory: ${{ runner.temp }}
+        run: |
+          wheel="$(ls "$GITHUB_WORKSPACE"/dist/*.whl)"
+          python -m venv fresh
+          fresh/bin/python -m pip install --no-index "$wheel"
+          expected="stm32-installer $(basename "$wheel" | cut -d- -f2)"
+          for got in "$(fresh/bin/stm32-installer --version)" "$(fresh/bin/python -m stm32_installer --version)"; do
+            echo "$got"
+            test "$got" = "$expected"
+          done

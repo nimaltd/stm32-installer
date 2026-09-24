@@ -24,6 +24,8 @@ stm32-installer nimaltd/example
 
 To update it later, `pip install --upgrade stm32-installer`. To remove it, `pip uninstall stm32-installer`.
 
+On Windows, if `stm32-installer` is not found after installing, pip put it in a folder that is not on your PATH. `python -m stm32_installer nimaltd/example` runs the same thing.
+
 On Linux or macOS, if pip refuses with `externally-managed-environment`, use `pipx install stm32-installer` instead, and `pipx upgrade stm32-installer` to update.
 
 A library can need a newer installer than the one you have. It then says so and changes nothing:

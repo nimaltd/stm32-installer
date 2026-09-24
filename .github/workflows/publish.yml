@@ -35,6 +35,20 @@ jobs:
           echo "release tag: $tag, package version: $version"
           test "$tag" = "$version"
 
+      # The same check as in CI, run again on exactly what is about to go out:
+      # installed on its own from outside the checkout, then started both ways.
+      - name: Run what was built
+        working-directory: ${{ runner.temp }}
+        run: |
+          wheel="$(ls "$GITHUB_WORKSPACE"/dist/*.whl)"
+          python -m venv fresh
+          fresh/bin/python -m pip install --no-index "$wheel"
+          expected="stm32-installer $(basename "$wheel" | cut -d- -f2)"
+          for got in "$(fresh/bin/stm32-installer --version)" "$(fresh/bin/python -m stm32_installer --version)"; do
+            echo "$got"
+            test "$got" = "$expected"
+          done
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist
