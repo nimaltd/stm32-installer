@@ -12,7 +12,7 @@ import zipfile
 
 import pytest
 
-from stm32_installer import cli, download
+from stm32_installer import __version__, cli, download
 
 
 class _Stream:
@@ -344,3 +344,21 @@ def test_ctrl_c_at_the_question_stops_the_install(library, project, tmp_path, mo
 
     assert cli.main([str(source), "--project", str(root)]) == 130
     assert not (root / "demo").exists()
+
+
+# ----------------------------------------------------------------------------
+# The installer's own version.
+# ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("flag", ["--version", "-V"])
+def test_the_version_is_shown_and_nothing_else_happens(flag, no_network, capsys):
+    """
+    A library that needs a newer installer names the version it wants, so a
+    user has to be able to see which one they have without going through pip.
+    """
+    with pytest.raises(SystemExit) as stopped:
+        cli.main([flag])
+
+    assert stopped.value.code == 0
+    assert capsys.readouterr().out == f"stm32-installer {__version__}\n"

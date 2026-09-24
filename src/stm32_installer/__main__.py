@@ -1,4 +1,4 @@
-"""Lets the package be run directly: python -m stm32_installer fsm"""
+"""Lets the package be run directly: python -m stm32_installer nimaltd/example"""
 
 import sys
 

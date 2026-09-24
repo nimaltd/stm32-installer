@@ -75,6 +75,7 @@ The zip does not need unpacking first. If you did unpack it with Windows' **Extr
 | `--dir Libs/example` | The folder of your project to install into. Asked for when not given, with the library's name as the answer if you just press Enter |
 | `--project D:/Work/MyBoard` | Your project's root, when you are not running from it |
 | `--ide cubeide` | Register with this IDE only: `cmake`, `cubeide`, `keil` or `iar`. Every one found, when not given |
+| `--version` | Show which version of the installer you have, and do nothing else |
 
 `--ref` holds a project on one release, which is useful when you need exactly what you built with last time:
 

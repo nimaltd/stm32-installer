@@ -32,7 +32,7 @@ import re
 import sys
 from pathlib import Path, PurePosixPath
 
-from . import checks, console, download, ide, installer, manifest
+from . import __version__, checks, console, download, ide, installer, manifest
 
 # A drive letter, as in D:/Downloads or C:\Users.
 _DRIVE = re.compile(r"^[A-Za-z]:")
@@ -452,6 +452,14 @@ def main(argv=None, library_root=None):
         default=None,
         choices=["cmake", "cubeide", "keil", "iar"],
         help="only register with this IDE. Default is every one found.",
+    )
+    # -V as well, because that is what pip and python answer to.
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="show which version of the installer this is, and do nothing else.",
     )
 
     args = parser.parse_args(argv)
