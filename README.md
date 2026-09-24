@@ -73,7 +73,7 @@ The zip does not need unpacking first. If you did unpack it with Windows' **Extr
 
 | Option | What it does |
 |---|---|
-| `--ref 2.0.0` | A tag, a branch or a commit to take from GitHub. `master` when not given |
+| `--ref v2.0.0` | A tag, a branch or a commit to take from GitHub. `master` when not given |
 | `--dir Libs/example` | The folder of your project to install into. Asked for when not given, with the library's name as the answer if you just press Enter |
 | `--project D:/Work/MyBoard` | Your project's root, when you are not running from it |
 | `--ide cubeide` | Register with this IDE only: `cmake`, `cubeide`, `keil` or `iar`. Every one found, when not given |
@@ -82,7 +82,7 @@ The zip does not need unpacking first. If you did unpack it with Windows' **Extr
 `--ref` holds a project on one release, which is useful when you need exactly what you built with last time:
 
 ```bash
-stm32-installer nimaltd/example --ref 2.0.0          # a tag
+stm32-installer nimaltd/example --ref v2.0.0         # a tag
 stm32-installer nimaltd/example --ref develop        # a branch
 stm32-installer nimaltd/example --ref 00949e695e16   # an exact commit
 ```
