@@ -53,6 +53,35 @@ stm32-installer D:/Downloads/example-master.zip
 
 Neither line needs the internet. The installer needs nothing but itself, and the library comes from the zip.
 
+### A private repository
+
+Give the installer a GitHub token that can read the repository, in the `GITHUB_TOKEN` environment variable, and install by name as usual.
+
+**Windows, PowerShell:**
+
+```powershell
+$env:GITHUB_TOKEN = "github_pat_..."
+stm32-installer yourname/your-library
+```
+
+**Windows, Command Prompt:**
+
+```bat
+set GITHUB_TOKEN=github_pat_...
+stm32-installer yourname/your-library
+```
+
+**Linux and macOS:**
+
+```bash
+export GITHUB_TOKEN=github_pat_...
+stm32-installer yourname/your-library
+```
+
+A fine-grained token is enough. On GitHub, under Settings, Developer settings, Personal access tokens, Fine-grained tokens, give it the repository and Contents read-only. If you use the `gh` command, `gh auth token` prints the token you are signed in with, and `GH_TOKEN` works as well as `GITHUB_TOKEN`.
+
+The token is read from the environment only, never from the command line, where it would stay in your shell's history. It is sent to GitHub and nowhere else.
+
 ### What to install
 
 The one argument can be any of these:

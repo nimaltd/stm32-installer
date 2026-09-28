@@ -7,12 +7,18 @@ out a zip of an entire repository, so the zip is avoided: the manifest is read
 first, then each listed file is fetched on its own. For a library whose repo
 carries a vendored test framework, that is the difference between a few hundred
 kilobytes and a few.
+
+A private repository needs a GitHub token that can read it, in GITHUB_TOKEN or
+GH_TOKEN. With one, every file comes from the API rather than from
+raw.githubusercontent, which cannot see a private repository at all.
 """
 
 import json
+import os
 import shutil
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -20,26 +26,122 @@ from pathlib import Path
 from . import manifest, yamlreader
 
 RAW_URL = "https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}"
+CONTENTS_URL = "https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={ref}"
 TREE_URL = "https://api.github.com/repos/{owner}/{repo}/git/trees/{ref}?recursive=1"
 DEFAULT_OWNER = "nimaltd"
 TIMEOUT_SECONDS = 30
+
+# Where a token is looked for, in this order. GitHub Actions sets the first and
+# the gh command reads the second, so a machine set up for either works as it
+# is. Never an option on the command line, where it would stay in the shell's
+# history.
+TOKEN_VARIABLES = ("GITHUB_TOKEN", "GH_TOKEN")
+
+# The file as it is, not wrapped in JSON and base64 the way the API hands a file
+# out by default.
+RAW_MEDIA = "application/vnd.github.raw"
 
 
 class DownloadError(Exception):
     """A library could not be fetched, with a reason worth showing the user."""
 
 
+class _SameHostRedirect(urllib.request.HTTPRedirectHandler):
+    """
+    Follow a redirect, but take the token only as far as the host it was for.
+
+    urllib copies every header over to wherever a redirect points, the
+    Authorization header included, and GitHub does redirect, for a renamed
+    repository to start with. A token must not travel anywhere but back to the
+    host it was sent to.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+
+        if new is not None:
+            before = urllib.parse.urlsplit(req.full_url).hostname
+            after = urllib.parse.urlsplit(newurl).hostname
+
+            if before != after:
+                new.remove_header("Authorization")
+
+        return new
+
+
+_OPENER = urllib.request.build_opener(_SameHostRedirect)
+
+
+def _token():
+    """(variable, token) for the first token set in the environment, or (None, None)."""
+    for name in TOKEN_VARIABLES:
+        value = os.environ.get(name, "").strip()
+
+        if value:
+            return name, value
+
+    return None, None
+
+
+def _open(url, token=None, accept=None):
+    """Open a URL, sending the token when there is one."""
+    request = urllib.request.Request(url)
+
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+
+    if accept:
+        request.add_header("Accept", accept)
+
+    return _OPENER.open(request, timeout=TIMEOUT_SECONDS)
+
+
 def _fetch(owner, repo, ref, path):
     """Fetch one file's bytes. Raises DownloadError with a readable message."""
-    url = RAW_URL.format(owner=owner, repo=repo, ref=ref, path=path)
+    variable, token = _token()
+
+    if token:
+        url = CONTENTS_URL.format(
+            owner=owner, repo=repo, path=urllib.parse.quote(path), ref=urllib.parse.quote(ref, safe="")
+        )
+    else:
+        url = RAW_URL.format(owner=owner, repo=repo, ref=ref, path=path)
 
     try:
-        with urllib.request.urlopen(url, timeout=TIMEOUT_SECONDS) as response:
+        with _open(url, token, RAW_MEDIA if token else None) as response:
             return response.read()
     except urllib.error.HTTPError as error:
+        if error.code == 401 and token:
+            raise DownloadError(
+                f"GitHub did not accept the token in {variable}. It may have expired, or been revoked."
+            ) from error
+
+        if error.code == 403:
+            raise DownloadError(
+                f"GitHub refused access to {owner}/{repo} (HTTP 403)"
+                + (
+                    f" with the token in {variable}. It may not be allowed to read this repository."
+                    if token else
+                    ". That is usually its limit on requests without a token: wait, or set GITHUB_TOKEN."
+                )
+            ) from error
+
         if error.code == 404:
-            raise DownloadError(f"{path} does not exist in {owner}/{repo} at {ref}.") from error
-        raise DownloadError(f"Could not download {url}: HTTP {error.code}.") from error
+            # GitHub answers a private repository it will not show you with 404,
+            # the same as one that does not exist. Only the manifest is asked for
+            # first, so that is where a missing token shows up.
+            hint = ""
+
+            if path == "library.yml":
+                hint = (
+                    f" If the repository is private, the token in {variable} cannot read it."
+                    if token else
+                    " If the repository is private, set GITHUB_TOKEN to a token that can read it."
+                )
+
+            raise DownloadError(f"{path} does not exist in {owner}/{repo} at {ref}.{hint}") from error
+
+        raise DownloadError(f"Could not download {path} from {owner}/{repo}: HTTP {error.code}.") from error
     except urllib.error.URLError as error:
         raise DownloadError(f"Could not reach GitHub: {error.reason}.") from error
 
@@ -76,10 +178,10 @@ def tree(owner, repo, ref):
     None when the listing is unavailable, so the caller can fall back to
     treating each entry as a literal path.
     """
-    url = TREE_URL.format(owner=owner, repo=repo, ref=ref)
+    url = TREE_URL.format(owner=owner, repo=repo, ref=urllib.parse.quote(ref, safe=""))
 
     try:
-        with urllib.request.urlopen(url, timeout=TIMEOUT_SECONDS) as response:
+        with _open(url, _token()[1], "application/vnd.github+json") as response:
             data = json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, OSError, ValueError):
         return None
