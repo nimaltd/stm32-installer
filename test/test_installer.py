@@ -191,3 +191,242 @@ def test_mirror_layout_creates_the_subfolders_when_copying_elsewhere(library, tm
 
     assert (destination / "inc" / "demo.h").is_file()
     assert (destination / "src" / "demo.c").is_file()
+
+
+# ----------------------------------------------------------------------------
+# Updates that change where the files go.
+# ----------------------------------------------------------------------------
+
+
+def _two_versions(library, tmp_path):
+    """
+    One library twice: first flat, then with its code and config in src/.
+
+    That is what sequencer did after 2.0.0, and the update from one to the
+    other is what has to leave a working project behind.
+    """
+    old = manifest.load(library(root=tmp_path / "v1", headers=["src/demo.h"], sources=["src/demo.c"]))
+    new = manifest.load(
+        library(
+            root=tmp_path / "v2",
+            headers=["src/demo.h"],
+            sources=["src/demo.c"],
+            once=[{"from": "template/demo_config.h", "to": "src/demo_config.h"}],
+            install={"layout": "mirror"},
+        )
+    )
+
+    return old, new
+
+
+def _resolved(pairs):
+    """Moved pairs with both ends resolved, since a temp path can come back in another form."""
+    return [(a.resolve(), b.resolve()) for a, b in pairs]
+
+
+def test_an_update_carries_the_users_config_to_its_new_place(library, tmp_path):
+    """
+    The user's settings follow the file, and no fresh default is made in its way.
+
+    A default created in src/ would sit beside the header and be found first,
+    so the user's own settings would stop applying without a word.
+    """
+    old, new = _two_versions(library, tmp_path)
+    project = tmp_path / "Proj"
+    destination = project / "demo"
+
+    installer.install_to(old, destination, project_root=project)
+    (destination / "demo_config.h").write_text("#define DEMO_SIZE 64\n", encoding="utf-8")
+
+    result = installer.install_to(new, destination, project_root=project)
+
+    assert (destination / "src" / "demo_config.h").read_text(encoding="utf-8") == "#define DEMO_SIZE 64\n"
+    assert not (destination / "demo_config.h").exists()
+    assert _resolved(result.moved) == _resolved(
+        [(destination / "demo_config.h", destination / "src" / "demo_config.h")]
+    )
+    assert result.created == []
+    assert result.was_update
+
+
+def test_an_update_removes_what_the_new_version_no_longer_ships(library, tmp_path):
+    """Left behind, the old demo.c sits beside src/demo.c and CubeIDE compiles both."""
+    old, new = _two_versions(library, tmp_path)
+    project = tmp_path / "Proj"
+    destination = project / "demo"
+
+    installer.install_to(old, destination, project_root=project)
+    (destination / "my_notes.txt").write_text("mine\n", encoding="utf-8")
+
+    result = installer.install_to(new, destination, project_root=project)
+
+    assert not (destination / "demo.h").exists()
+    assert not (destination / "demo.c").exists()
+    assert (destination / "src" / "demo.c").is_file()
+    assert (destination / "my_notes.txt").is_file(), "a file the user added was removed"
+    assert sorted(p.name for p in result.dropped) == ["demo.c", "demo.h"]
+
+    record = installer.installed_libraries(project)["demo"]
+
+    assert "demo/demo.c" not in record["files"]
+    assert "demo/src/demo.c" in record["files"]
+    assert record["once"] == ["demo/src/demo_config.h"]
+
+
+def test_an_untouched_default_gives_way_to_the_users_copy(library, tmp_path):
+    """
+    An older installer, updating to the new layout, created a default in src/
+    and left the user's file where it was. The user's copy takes its place.
+    """
+    old, new = _two_versions(library, tmp_path)
+    project = tmp_path / "Proj"
+    destination = project / "demo"
+
+    installer.install_to(old, destination, project_root=project)
+    (destination / "demo_config.h").write_text("#define DEMO_SIZE 64\n", encoding="utf-8")
+    (destination / "src").mkdir()
+    (destination / "src" / "demo_config.h").write_text("#define DEMO_SIZE 8\n", encoding="utf-8")
+
+    installer.install_to(new, destination, project_root=project)
+
+    assert (destination / "src" / "demo_config.h").read_text(encoding="utf-8") == "#define DEMO_SIZE 64\n"
+
+
+def test_a_config_already_changed_in_its_new_place_is_left_alone(library, tmp_path):
+    """Two edited copies: neither is the default, so neither is thrown away."""
+    old, new = _two_versions(library, tmp_path)
+    project = tmp_path / "Proj"
+    destination = project / "demo"
+
+    installer.install_to(old, destination, project_root=project)
+    (destination / "demo_config.h").write_text("#define DEMO_SIZE 64\n", encoding="utf-8")
+    (destination / "src").mkdir()
+    (destination / "src" / "demo_config.h").write_text("#define DEMO_SIZE 32\n", encoding="utf-8")
+
+    result = installer.install_to(new, destination, project_root=project)
+
+    assert (destination / "src" / "demo_config.h").read_text(encoding="utf-8") == "#define DEMO_SIZE 32\n"
+    assert (destination / "demo_config.h").read_text(encoding="utf-8") == "#define DEMO_SIZE 64\n"
+    assert result.moved == []
+
+
+def test_installing_into_another_folder_leaves_the_first_copy_alone(library, tmp_path):
+    """A second copy somewhere else is the user's choice, not an update of the first."""
+    old, new = _two_versions(library, tmp_path)
+    project = tmp_path / "Proj"
+
+    installer.install_to(old, project / "demo", project_root=project)
+    result = installer.install_to(new, project / "Libs" / "demo", project_root=project)
+
+    assert (project / "demo" / "demo.c").is_file()
+    assert (project / "demo" / "demo_config.h").is_file()
+    assert result.dropped == []
+    assert result.moved == []
+
+
+def test_an_update_in_place_puts_the_users_config_over_the_template(library, tmp_path):
+    """
+    The new repository is dropped over the installed folder and installed where
+    it stands. Its own template already sits at src/demo_config.h, so without
+    the move that template would be kept and the user's settings ignored.
+    """
+    project = tmp_path / "Proj"
+    folder = project / "demo"
+
+    old = manifest.load(library(root=folder, headers=["src/demo.h"], sources=["src/demo.c"]))
+    installer.install_in_place(old, project_root=project)
+    (folder / "demo_config.h").write_text("#define DEMO_SIZE 64\n", encoding="utf-8")
+
+    new = manifest.load(
+        library(
+            root=folder,
+            headers=["src/demo.h"],
+            sources=["src/demo.c"],
+            once=[{"from": "src/demo_config.h", "to": "src/demo_config.h"}],
+            extra_files={"src/demo_config.h": "#define DEMO_SIZE 8\n"},
+            install={"layout": "mirror"},
+        )
+    )
+    installer.install_in_place(new, project_root=project)
+
+    assert (folder / "src" / "demo_config.h").read_text(encoding="utf-8") == "#define DEMO_SIZE 64\n"
+    assert not (folder / "demo_config.h").exists()
+    assert not (folder / "demo.c").exists()
+    assert not (folder / "library.yml").exists()
+
+
+def test_an_update_never_deletes_outside_the_library_folder(library, tmp_path):
+    """
+    The record is a file anyone can edit, and an older tool may have written it.
+    Whatever it lists, nothing outside the library's own folder is removed.
+    """
+    old, new = _two_versions(library, tmp_path)
+    project = tmp_path / "Proj"
+    main = project / "Core" / "Src" / "main.c"
+    main.parent.mkdir(parents=True)
+    main.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+
+    installer.install_to(old, project / "demo", project_root=project)
+    record_path = project / installer.RECORD_NAME
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["libraries"]["demo"]["files"].append("Core/Src/main.c")
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    installer.install_to(new, project / "demo", project_root=project)
+
+    assert main.is_file(), "the user's main.c was deleted"
+
+
+def test_each_of_the_users_files_moves_to_its_own_place(library, tmp_path):
+    """
+    A config and a port layer both move. Each keeps its own content.
+
+    The new version lists them in the opposite order to the record, which is
+    sorted, so a match on anything but the name would pair them up wrongly.
+    """
+    extra = {"template/demo_port.c": "/* port */\n"}
+    old = manifest.load(
+        library(
+            root=tmp_path / "v1",
+            once=[{"from": "template/demo_config.h"}, {"from": "template/demo_port.c"}],
+            extra_files=extra,
+        )
+    )
+    new = manifest.load(
+        library(
+            root=tmp_path / "v2",
+            once=[
+                {"from": "template/demo_port.c", "to": "src/demo_port.c"},
+                {"from": "template/demo_config.h", "to": "src/demo_config.h"},
+            ],
+            extra_files=extra,
+            install={"layout": "mirror"},
+        )
+    )
+    project = tmp_path / "Proj"
+    destination = project / "demo"
+
+    installer.install_to(old, destination, project_root=project)
+    (destination / "demo_config.h").write_text("#define DEMO_SIZE 64\n", encoding="utf-8")
+    (destination / "demo_port.c").write_text("/* my port */\n", encoding="utf-8")
+
+    installer.install_to(new, destination, project_root=project)
+
+    assert (destination / "src" / "demo_config.h").read_text(encoding="utf-8") == "#define DEMO_SIZE 64\n"
+    assert (destination / "src" / "demo_port.c").read_text(encoding="utf-8") == "/* my port */\n"
+
+
+def test_a_folder_an_update_empties_is_removed(library, tmp_path):
+    """Going back from src/ to flat leaves src/ empty, and an empty folder is clutter."""
+    new, old = _two_versions(library, tmp_path)
+    project = tmp_path / "Proj"
+    destination = project / "demo"
+
+    installer.install_to(old, destination, project_root=project)
+    assert (destination / "src" / "demo.c").is_file()
+
+    installer.install_to(new, destination, project_root=project)
+
+    assert (destination / "demo.c").is_file()
+    assert (destination / "demo_config.h").is_file(), "the config did not come back up"
+    assert not (destination / "src").exists()

@@ -34,6 +34,8 @@ from .base import (
     MANUAL,
     Outcome,
     backup,
+    compiled_names,
+    element_indent,
     forward_slashes,
     include_folders,
     indent_of,
@@ -69,6 +71,10 @@ WORKSPACE_PROJECT = re.compile(r"<path>\s*\$WS_DIR\$[\\/]([^<]+?)\s*</path>")
 
 # End of the project, where a new group can be appended.
 PROJECT_CLOSE = re.compile(r"</project>\s*$")
+
+# One <file> element as whole lines, with any <excluded> configurations inside
+# it. Files do not nest, so the first </file> is its own, even though groups do.
+FILE_ELEMENT = re.compile(r"^[ \t]*<file>.*?</file>[ \t]*\r?\n", re.DOTALL | re.MULTILINE)
 
 
 def _named_projects(workspace):
@@ -145,22 +151,96 @@ def _group(library_name, names, pad, step, newline):
     return newline.join(lines)
 
 
-def _with_group(text, library_name, folder, sources):
+def _entry_name(element):
+    """The path a <file> element names, forward slashed, or None."""
+    match = FILE_PATH.search(element)
+
+    return forward_slashes(match.group(1)) if match else None
+
+
+def _follow(text, dropped_names, names):
     """
-    The text with the library's group appended, or unchanged when there is
-    nothing to add.
+    Bring the entries of files an update moved or removed in step with it.
+
+    An entry whose file moved keeps its place, its group and any <excluded>
+    settings, and only its path changes. An entry whose file has nothing to
+    replace it is removed. Returns the new text and the names the project
+    still does not list at all.
+    """
+    wanted = {forward_slashes(name) for name in names}
+    listed = {forward_slashes(match.group(1)) for match in FILE_PATH.finditer(text)}
+    missing = [name for name in names if forward_slashes(name) not in listed]
+
+    for old in dropped_names:
+        key = forward_slashes(old)
+
+        if key in wanted or key not in listed:
+            continue
+
+        leaf = key.rsplit("/", 1)[-1]
+        moved = next((name for name in missing if forward_slashes(name).rsplit("/", 1)[-1] == leaf), None)
+
+        if moved is not None:
+            text = FILE_PATH.sub(
+                lambda m: m.group(0)[: m.start(1) - m.start(0)] + moved + m.group(0)[m.end(1) - m.start(0):]
+                if forward_slashes(m.group(1)) == key else m.group(0),
+                text,
+            )
+            missing.remove(moved)
+        else:
+            text = FILE_ELEMENT.sub(lambda m: "" if _entry_name(m.group(0)) == key else m.group(0), text)
+
+    return text, missing
+
+
+def _add_beside(text, missing, library):
+    """
+    Add files the library gained right after its last entry.
+
+    That puts them in the library's own group, whatever it has been renamed
+    to, and lines them up with the entries already there.
+    """
+    last = None
+
+    for entry in FILE_ELEMENT.finditer(text):
+        if _entry_name(entry.group(0)) in library:
+            last = entry
+
+    if last is None:
+        return text
+
+    pad, step = element_indent(last.group(0))
+    newline = line_ending(text)
+    block = "".join(
+        f"{pad}<file>{newline}{pad}{step}<name>{name}</name>{newline}{pad}</file>{newline}"
+        for name in missing
+    )
+
+    return text[:last.end()] + block + text[last.end():]
+
+
+def _with_group(text, library_name, folder, sources, dropped=()):
+    """
+    The text with the library's files in it, or unchanged when nothing is missing.
+
+    On an update, entries for files that moved follow them and entries for
+    files that are gone go. Files the library gained join its existing group.
+    A library the project has none of gets a group of its own.
 
     Used for the .ewp and again for the .ewt beside it, which carries the same
     file tree for the analysis tools and no include paths at all.
     """
     names = _file_names(text, folder, sources)
-    listed = {forward_slashes(match.group(1)) for match in FILE_PATH.finditer(text)}
+    text, missing = _follow(text, _file_names(text, folder, dropped), names)
 
     # A header only library has nothing to compile, so it gets an include path
     # and no group. An empty group would be added again on every run, since
     # there would be no file in the project to recognise it by.
-    if not names or any(forward_slashes(name) in listed for name in names):
+    if not names or not missing:
         return text
+
+    if len(missing) < len(names):
+        return _add_beside(text, missing, {forward_slashes(name) for name in names})
 
     closing = PROJECT_CLOSE.search(text)
 
@@ -179,9 +259,15 @@ def _with_group(text, library_name, folder, sources):
     return text[:at] + newline + _group(library_name, names, pad, step, newline) + text[at:]
 
 
-def integrate(ewp, library, destination, project_root):
-    """Register the library's sources and include path with an IAR project."""
+def integrate(ewp, library, destination, project_root, dropped=()):
+    """
+    Register the library's sources and include path with an IAR project.
+
+    dropped lists the library files an update has just removed, so the entries
+    that named them can follow the file to its new place or go.
+    """
     path = Path(ewp)
+    dropped = compiled_names(dropped, destination)
     # Paths inside a .ewp are written relative to the folder holding it.
     folder = relative(destination, path.parent)
 
@@ -220,8 +306,13 @@ def integrate(ewp, library, destination, project_root):
 
         return match.group(1) + body.rstrip() + "".join(added) + newline + outer + match.group(3)
 
+    listed = {forward_slashes(match.group(1)) for match in FILE_PATH.finditer(text)}
+    was_there = any(
+        forward_slashes(name) in listed
+        for name in _file_names(text, folder, list(library.build_sources) + dropped)
+    )
     updated = _with_group(
-        INCLUDE_OPTION.sub(add_include, text), library.name, folder, library.build_sources
+        INCLUDE_OPTION.sub(add_include, text), library.name, folder, library.build_sources, dropped
     )
 
     if updated == text:
@@ -236,7 +327,7 @@ def integrate(ewp, library, destination, project_root):
                        _manual_steps(folder), saved)
 
     steps = ["Reopen the workspace in IAR so it reloads the file list."]
-    also = _sync_companion(path, library, folder)
+    also = _sync_companion(path, library, folder, dropped)
 
     if also:
         steps.insert(0, also)
@@ -244,13 +335,13 @@ def integrate(ewp, library, destination, project_root):
     return Outcome(
         NAME,
         CHANGED,
-        f"Added {library.name} to {path.name}.",
+        f"Updated {library.name} in {path.name}." if was_there else f"Added {library.name} to {path.name}.",
         steps=steps,
         backup=saved,
     )
 
 
-def _sync_companion(ewp, library, folder):
+def _sync_companion(ewp, library, folder, dropped=()):
     """
     Keep the .ewt beside the project in step with it.
 
@@ -272,7 +363,7 @@ def _sync_companion(ewp, library, folder):
     except OSError:
         return f"Could not read {companion.name}. Only {Path(ewp).name} was updated."
 
-    updated = _with_group(text, library.name, folder, library.build_sources)
+    updated = _with_group(text, library.name, folder, library.build_sources, dropped)
 
     if updated == text:
         return None

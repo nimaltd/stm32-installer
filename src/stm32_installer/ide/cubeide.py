@@ -143,8 +143,13 @@ def _add_source_folder(text, folder, newline):
     return updated
 
 
-def integrate(cproject, library, destination, project_root):
-    """Add the library to the include path and the source folders."""
+def integrate(cproject, library, destination, project_root, dropped=()):
+    """
+    Add the library to the include path and the source folders.
+
+    dropped needs nothing here: CubeIDE compiles whatever is in a source
+    folder, so a file removed from disk has left the build as well.
+    """
     path = Path(cproject)
     folder = relative(destination, project_root)
 

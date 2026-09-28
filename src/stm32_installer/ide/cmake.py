@@ -154,8 +154,14 @@ def _block(library, folder, plain):
     )
 
 
-def integrate(cmakelists, library, destination, project_root):
-    """Give the library its own CMakeLists.txt, then point the project at it."""
+def integrate(cmakelists, library, destination, project_root, dropped=()):
+    """
+    Give the library its own CMakeLists.txt, then point the project at it.
+
+    dropped needs nothing here: the library's CMakeLists.txt is written again
+    from the new file list on every install, so a file that has gone is simply
+    no longer in it.
+    """
     path = Path(cmakelists)
     folder = relative(destination, project_root)
 

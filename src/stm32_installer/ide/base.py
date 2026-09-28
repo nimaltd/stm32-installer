@@ -20,7 +20,9 @@ import os
 import re
 import shutil
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+
+from ..manifest import COMPILED
 
 # Wraps what this tool adds to a text file, so it can be found again.
 MARK_OPEN = "# >>> stm32-installer: {name} >>>"
@@ -177,6 +179,41 @@ def inner_indent(body, outer):
 def indent_step(outer, inner):
     """One nesting level, read off as the difference between two of them."""
     return inner[len(outer):] or ("\t" if outer.endswith("\t") else "  ")
+
+
+def element_indent(element):
+    """
+    The indentation an element starts at, and one step into it.
+
+    Read off an element that is already in the file, so one added beside it
+    lines up with it.
+    """
+    lines = element.splitlines()
+    pad = lines[0][: len(lines[0]) - len(lines[0].lstrip(" \t"))]
+    inner = lines[1][: len(lines[1]) - len(lines[1].lstrip(" \t"))] if len(lines) > 1 else pad
+
+    return pad, indent_step(pad, inner)
+
+
+def compiled_names(paths, destination):
+    """
+    The files among paths that a compiler takes, as posix names inside destination.
+
+    Used for what an update removed, so that an IDE naming every file can let go
+    of them. Anything outside the library's folder is not the library's.
+    """
+    names = []
+
+    for path in paths:
+        try:
+            name = Path(path).resolve().relative_to(Path(destination).resolve()).as_posix()
+        except (ValueError, OSError):
+            continue
+
+        if PurePosixPath(name).suffix.lower() in COMPILED:
+            names.append(name)
+
+    return names
 
 
 def insert_before(text, at):

@@ -76,7 +76,7 @@ The zip does not need unpacking first. If you did unpack it with Windows' **Extr
 | `--ref v2.0.0` | A tag, a branch or a commit to take from GitHub. `master` when not given |
 | `--dir Libs/example` | The folder of your project to install into. Asked for when not given, with the library's name as the answer if you just press Enter |
 | `--project D:/Work/MyBoard` | Your project's root, when you are not running from it |
-| `--ide cubeide` | Register with this IDE only: `cmake`, `cubeide`, `keil` or `iar`. Every one found, when not given |
+| `--ide cubeide` | Register with this IDE only: `cmake`, `cubeide`, `keil`, `iar` or `makefile`. Every one found, when not given |
 | `--version` | Show which version of the installer you have, and do nothing else |
 
 `--ref` holds a project on one release, which is useful when you need exactly what you built with last time:
@@ -116,6 +116,17 @@ Files
 This was an update. Code replaced, your configuration kept.
 ```
 
+When a new version keeps its files somewhere else, say in `src/`, the update moves your project along with it. Your `example_config.h` goes where the new version looks for it, with your settings still in it, rather than a fresh default turning up next to the header. Files the old version installed and the new one no longer has are removed, so an old `example.c` cannot end up compiled beside the new one. Keil, IAR and the Makefile are pointed at the new places, and a file the library gained joins its group there. Anything you put in the library's folder yourself is left alone.
+
+```
+Files
+  written example/src/example.h
+  written example/src/example.c
+  moved   example/example_config.h -> example/src/example_config.h  yours, kept as it was
+  removed example/example.h  no longer part of the library
+  removed example/example.c  no longer part of the library
+```
+
 ### What you see
 
 A first install from a downloaded zip, into a CubeMX project that builds with both CMake and STM32CubeIDE:
@@ -151,7 +162,7 @@ The first line says where the library came from: `Fetching nimaltd/example ...` 
 
 ## What it does for you
 
-**Finds your IDE and wires the library in.** CMake, STM32CubeIDE, Keil MDK and IAR are all handled, and a project can be more than one of them at once.
+**Finds your IDE and wires the library in.** CMake, STM32CubeIDE, Keil MDK, IAR and CubeMX's Makefile are all handled, and a project can be more than one of them at once.
 
 | IDE | What gets changed |
 |---|---|
@@ -159,6 +170,9 @@ The first line says where the library came from: `Fetching nimaltd/example ...` 
 | STM32CubeIDE | The include path, and the source folders where the project lists them, in every build configuration of `.cproject` |
 | Keil MDK 5 and 6 | A file group and the include path in `.uvprojx` |
 | IAR EWARM | A file group and the include path in `.ewp` |
+| Makefile from CubeMX | The sources at the end of `C_SOURCES`, the include folder at the end of `C_INCLUDES` |
+
+CubeMX can write its Makefile again when it generates code, and the library's lines go with it. Run the installer again after that and they are back.
 
 **Never overwrites your configuration.** `example_config.h` is created once. Reinstall as often as you like: the code is replaced, your settings are not.
 
@@ -228,10 +242,9 @@ requires:
   c_standard: c11
 
 install:
-  layout: flat          # flat (default) puts every file at the top of the
-                        # folder, so one include path covers the library.
-                        # mirror keeps the repository's own folders, for a
-                        # library too big to flatten sensibly.
+  layout: mirror        # mirror keeps the repository's own folders, so the
+                        # code lands in src/ just as it sits here. flat (the
+                        # default) puts every file at the top of the folder.
 
 files:
   headers:
@@ -244,6 +257,7 @@ files:
 
 once:                   # copied once, then it belongs to the user
   - from: src/example_config.h
+    to: src/example_config.h  # beside the header that includes it
   - from: src/example_port.c  # a .c starter works the same way
     to: my_port.c             # "to" only when the name should change
 
@@ -265,7 +279,7 @@ There is no `version` in it. The installer reads the version from the `@version`
 
 `requires.installer` is the oldest stm32-installer that reads the file correctly. It is checked before anything else in the file is read, so when a manifest starts using something only a newer installer understands, raising this makes an older one stop with a message saying to update, rather than read the file wrongly without a word. Write it as three numbers, `1.1.0`: unquoted, YAML reads `1.10` as the decimal number `1.1`, and that is refused.
 
-A file listed under `once` is copied only when it is missing, so the user's own edits survive every update. It keeps its own name unless you give it a `to`.
+A file listed under `once` is copied only when it is missing, so the user's own edits survive every update. It keeps its own name unless you give it a `to`, and it lands at the top of the library's folder whatever the layout. With `mirror`, give a configuration header a `to` that puts it beside the header including it, as above. At the top, the include path the layout gives would not reach it.
 
 The key says what happens rather than what the file is. It is usually a configuration header, but the same rule fits a port layer someone fills in, or a table they tune: anything that is the library's to start and theirs from then on.
 

@@ -24,6 +24,8 @@ from .base import (
     MANUAL,
     Outcome,
     backup,
+    compiled_names,
+    element_indent,
     forward_slashes,
     include_folders,
     indent_of,
@@ -49,6 +51,10 @@ FILE_PATH = re.compile(r"<FilePath>(.*?)</FilePath>", re.DOTALL)
 # The <Groups> container holding a target's file groups, and its body. There is
 # one per target, and a project with a second target needs the library in both.
 GROUPS = re.compile(r"(<Groups>)(.*?)(</Groups>)", re.DOTALL)
+
+# One <File> element as whole lines, with whatever per-file options uVision has
+# stored inside it. Elements do not nest, so the first </File> is its own.
+FILE_ELEMENT = re.compile(r"^[ \t]*<File>.*?</File>[ \t]*\r?\n", re.DOTALL | re.MULTILINE)
 
 
 def detect(project_root):
@@ -114,8 +120,81 @@ def _group(library_name, files, pad, step, newline):
     return newline.join(lines)
 
 
-def integrate(uvprojx, library, destination, project_root):
-    """Register the library's sources and include path with a Keil project."""
+def _entry_path(element):
+    """The path a <File> element names, forward slashed, or None."""
+    match = FILE_PATH.search(element)
+
+    return forward_slashes(match.group(1)) if match else None
+
+
+def _follow(text, dropped_paths, files):
+    """
+    Bring the entries of files an update moved or removed in step with it.
+
+    An entry whose file moved keeps its place, its group and any per-file
+    options uVision stored in it. Only its path changes. An entry whose file
+    has nothing to replace it is removed. Returns the new text and the
+    (name, path) pairs the project still does not name at all.
+    """
+    wanted = {forward_slashes(path) for _, path in files}
+    listed = {forward_slashes(match.group(1)) for match in FILE_PATH.finditer(text)}
+    missing = [(name, path) for name, path in files if forward_slashes(path) not in listed]
+
+    for old in dropped_paths:
+        key = forward_slashes(old)
+
+        if key in wanted or key not in listed:
+            continue
+
+        name = PurePosixPath(key).name
+        moved = next((pair for pair in missing if pair[0] == name), None)
+
+        if moved is not None:
+            text = FILE_PATH.sub(
+                lambda m: f"<FilePath>{moved[1]}</FilePath>"
+                if forward_slashes(m.group(1)) == key else m.group(0),
+                text,
+            )
+            missing.remove(moved)
+        else:
+            text = FILE_ELEMENT.sub(lambda m: "" if _entry_path(m.group(0)) == key else m.group(0), text)
+
+    return text, missing
+
+
+def _add_beside(text, missing, library, newline):
+    """
+    Add files the library gained next to its entries, in every target.
+
+    Right after its last entry, which puts them in the library's own group
+    whatever the user has renamed it to, lined up with the entries around them.
+    """
+    for container in reversed(list(GROUPS.finditer(text))):
+        last = None
+
+        for entry in FILE_ELEMENT.finditer(text, container.start(2), container.end(2)):
+            if _entry_path(entry.group(0)) in library:
+                last = entry
+
+        if last is None:
+            continue
+
+        pad, step = element_indent(last.group(0))
+        block = "".join(
+            line + newline for name, path in missing for line in _file_entry(name, path, pad, step)
+        )
+        text = text[:last.end()] + block + text[last.end():]
+
+    return text
+
+
+def integrate(uvprojx, library, destination, project_root, dropped=()):
+    """
+    Register the library's sources and include path with a Keil project.
+
+    dropped lists the library files an update has just removed, so the entries
+    that named them can follow the file to its new place or go.
+    """
     path = Path(uvprojx)
     # Paths inside a .uvprojx are relative to the folder holding it.
     folder = relative(destination, path.parent)
@@ -146,20 +225,25 @@ def integrate(uvprojx, library, destination, project_root):
     # split at a backslash.
     files = list(zip((PurePosixPath(name).name for name in library.build_sources), paths))
 
+    # An update first. Entries for files that moved follow them, and entries
+    # for files that are gone are removed, so what is missing after this is
+    # only what the project has never had.
+    dropped_paths = _file_paths(folder, compiled_names(dropped, destination), sep)
+    listed = {forward_slashes(match.group(1)) for match in FILE_PATH.finditer(text)}
+    was_there = any(forward_slashes(p) in listed for p in paths + dropped_paths)
+    updated, missing = _follow(text, dropped_paths, files)
+
     # A header only library has nothing to compile, so it gets an include path
     # and no group. An empty group would be added again on every run, since
     # there would be no file in the project to recognise it by.
-    listed = {forward_slashes(match.group(1)) for match in FILE_PATH.finditer(text)}
-    wanted = paths and not any(forward_slashes(p) in listed for p in paths)
-
-    updated = text
-
-    if wanted:
+    if files and len(missing) == len(files):
         # The group is appended after the target's own groups, which is where
         # uVision puts one added through Manage Project Items. Walking backwards
         # keeps each insertion from moving the offsets of the next.
-        for container in reversed(containers):
-            outer = indent_of(text, container.start())
+        before = updated
+
+        for container in reversed(list(GROUPS.finditer(before))):
+            outer = indent_of(before, container.start())
             inner = inner_indent(container.group(2), outer)
             step = indent_step(outer, inner)
             at = insert_before(updated, container.start(3))
@@ -167,6 +251,9 @@ def integrate(uvprojx, library, destination, project_root):
             block = _group(library.name, files, inner, step, newline)
 
             updated = updated[:at] + newline + block + updated[at:]
+    elif missing:
+        # The library is in the project and this version added files to it.
+        updated = _add_beside(updated, missing, {forward_slashes(p) for _, p in files}, newline)
 
     directories = [d.replace("/", sep) for d in include_folders(library, folder.replace("/", sep))]
 
@@ -193,7 +280,8 @@ def integrate(uvprojx, library, destination, project_root):
     return Outcome(
         NAME,
         CHANGED,
-        f"Added {library.name} to {path.name} in {len(containers)} target(s).",
+        f"Updated {library.name} in {path.name}." if was_there
+        else f"Added {library.name} to {path.name} in {len(containers)} target(s).",
         steps=["Close and reopen the project in uVision so it reloads the file list."],
         backup=saved,
     )

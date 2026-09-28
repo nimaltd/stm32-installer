@@ -10,10 +10,10 @@ failure there is reported rather than raised: the library is on disk either way,
 and the user can finish by hand from the steps printed.
 """
 
-from . import cmake, cubeide, iar, keil
+from . import cmake, cubeide, iar, keil, makefile
 from .base import ALREADY, CHANGED, MANUAL, SKIPPED, Outcome
 
-BACKENDS = (cmake, cubeide, keil, iar)
+BACKENDS = (cmake, cubeide, keil, iar, makefile)
 
 __all__ = ["ALREADY", "CHANGED", "MANUAL", "SKIPPED", "Outcome", "detect", "integrate"]
 
@@ -38,7 +38,7 @@ def detect(project_root):
     return found
 
 
-def integrate(project_root, library, destination, only=None):
+def integrate(project_root, library, destination, only=None, dropped=()):
     """
     Register a library with every IDE found in the project.
 
@@ -47,6 +47,9 @@ def integrate(project_root, library, destination, only=None):
         library: the Manifest that was installed.
         destination: the folder the library was installed into.
         only: restrict to one IDE by name, for example "cmake". None means all.
+        dropped: files an update just removed, because the new version no
+            longer ships them there. An IDE that names every file has to be
+            told, or it keeps pointing at files that are gone.
 
     Returns:
         A list of Outcome, one per IDE. Empty when no IDE was recognised.
@@ -58,7 +61,7 @@ def integrate(project_root, library, destination, only=None):
             continue
 
         try:
-            outcomes.append(backend.integrate(path, library, destination, project_root))
+            outcomes.append(backend.integrate(path, library, destination, project_root, dropped))
         except Exception as error:
             # An integration must never take the install down with it. The files
             # are already copied, and the user can finish the job by hand.

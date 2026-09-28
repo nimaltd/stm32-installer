@@ -236,6 +236,43 @@ EWT = (
     "</project>\n"
 )
 
+# The Makefile CubeMX writes when the toolchain is set to Makefile, cut down to
+# the parts that matter here. The last entry of each list has no backslash, and
+# CubeMX leaves two trailing spaces after the last C source.
+MAKEFILE = (
+    "######################################\n"
+    "# target\n"
+    "######################################\n"
+    "TARGET = Proj\n"
+    "\n"
+    "######################################\n"
+    "# source\n"
+    "######################################\n"
+    "# C sources\n"
+    "C_SOURCES =  \\\n"
+    "Core/Src/main.c \\\n"
+    "Core/Src/stm32g4xx_it.c \\\n"
+    "Drivers/STM32G4xx_HAL_Driver/Src/stm32g4xx_hal.c \\\n"
+    "Core/Src/system_stm32g4xx.c  \n"
+    "\n"
+    "# ASM sources\n"
+    "ASM_SOURCES =  \\\n"
+    "startup_stm32g431xx.s\n"
+    "\n"
+    "# C defines\n"
+    "C_DEFS =  \\\n"
+    "-DUSE_HAL_DRIVER \\\n"
+    "-DSTM32G431xx\n"
+    "\n"
+    "# C includes\n"
+    "C_INCLUDES =  \\\n"
+    "-ICore/Inc \\\n"
+    "-IDrivers/STM32G4xx_HAL_Driver/Inc \\\n"
+    "-IDrivers/CMSIS/Include\n"
+    "\n"
+    "CFLAGS += $(MCU) $(C_DEFS) $(C_INCLUDES) $(OPT) -Wall\n"
+)
+
 
 @pytest.fixture
 def project(tmp_path):
@@ -249,7 +286,7 @@ def project(tmp_path):
     """
 
     def build(cmake=False, cubeide=False, keil=False, iar=False, hal_conf=None, ioc=None,
-              newline="\n", iar_backup=False, keil_backup=False):
+              newline="\n", iar_backup=False, keil_backup=False, makefile=False):
         root = tmp_path / "Proj"
         (root / "Core" / "Inc").mkdir(parents=True, exist_ok=True)
         (root / "Core" / "Src").mkdir(parents=True, exist_ok=True)
@@ -290,6 +327,9 @@ def project(tmp_path):
                 # What IAR leaves behind when it upgrades a project. It is a
                 # valid .ewp, and its name sorts before the real one.
                 put(ewarm / "Backup of Proj.ewp", EWP)
+
+        if makefile:
+            put(root / "Makefile", MAKEFILE)
 
         if hal_conf is not None:
             (root / "Core" / "Inc" / "stm32f4xx_hal_conf.h").write_text(hal_conf, encoding="utf-8")

@@ -63,6 +63,11 @@ class Result:
         self.created = []
         self.kept = []
         self.removed = []
+        # An update only: (from, to) for each of the user's files carried to
+        # where the new version wants it, and the library's own files from the
+        # last install that the new version no longer ships.
+        self.moved = []
+        self.dropped = []
 
     @property
     def was_update(self):
@@ -70,22 +75,32 @@ class Result:
         return bool(self.kept)
 
 
-def install_to(library, destination, project_root=None):
+def install_to(library, destination, project_root=None, record=True):
     """
     Copy a library's files into one folder.
 
-    Everything lands flat, so the user adds a single include path rather than
-    one per subdirectory.
+    Where each file lands inside it is the library's layout: flat puts them all
+    at the top, mirror keeps the repository's own folders.
+
+    When the project already has this library in the same folder, this is an
+    update, and the project is brought in step with the new version. The
+    user's files move to wherever the new version puts them, rather than being
+    created again beside the old ones. Files the last install wrote and the new
+    version no longer ships are removed. Without that, a library that moved its
+    code into src/ left the old copies behind, CubeIDE compiled both, and a
+    fresh default config sat next to the header, silently winning over the
+    user's own.
 
     Args:
         library: a Manifest, from manifest.load().
         destination: folder to write into. Created if missing.
-        project_root: where to write the record of what was installed. Skipped
-            when not given, which is what install_in_place() wants, since it
-            records only after its cleanup has run.
+        project_root: where the record of what was installed lives. Without
+            it there is no record to read or write, so no update handling.
+        record: write the record at the end. install_in_place() turns this off,
+            since it records only after its cleanup has run.
 
     Returns:
-        A Result listing every file written, created or deliberately kept.
+        A Result listing every file written, created, kept, moved or dropped.
     """
     destination = Path(destination).resolve()
 
@@ -93,6 +108,7 @@ def install_to(library, destination, project_root=None):
         raise InstallError(f"{destination} is a file, so it cannot hold the library.")
 
     result = Result(library.name, library.version, destination)
+    previous = _previous(project_root, library.name, destination) if project_root is not None else None
 
     destination.mkdir(parents=True, exist_ok=True)
 
@@ -113,12 +129,24 @@ def install_to(library, destination, project_root=None):
     # A kept file belongs to the user from the moment it first lands.
     for entry in library.once:
         target = destination / entry.destination
+        template = library.root / entry.source
+        earlier = _earlier_copy(previous, project_root, target)
         target.parent.mkdir(parents=True, exist_ok=True)
 
-        if target.exists():
+        # The user's copy from the last install, somewhere the new version no
+        # longer looks. It moves, rather than a fresh default being created
+        # beside the header, where it would be found first and quietly replace
+        # the user's settings. It also takes over from a copy that is still
+        # the untouched default: that is the template itself when installing
+        # in place, or what an older installer created on an update.
+        if earlier is not None and (not target.exists() or _same_content(target, template)):
+            os.replace(earlier, target)
+            result.moved.append((earlier, target))
+            result.kept.append(target)
+        elif target.exists():
             result.kept.append(target)
         else:
-            shutil.copyfile(library.root / entry.source, target)
+            shutil.copyfile(template, target)
             result.created.append(target)
 
     # The licence and the NOTICE ride along, because the licence says they must,
@@ -133,7 +161,10 @@ def install_to(library, destination, project_root=None):
 
         result.installed.append(target)
 
-    if project_root is not None:
+    if previous is not None:
+        _drop_stale(previous, project_root, destination, result)
+
+    if project_root is not None and record:
         _record(project_root, library, result)
 
     return result
@@ -157,14 +188,115 @@ def install_in_place(library, cleanup=True, project_root=None):
     Returns:
         A Result, with removed listing everything deleted.
     """
-    result = install_to(library, library.root)
+    root = Path(project_root) if project_root is not None else library.root.parent
+    result = install_to(library, library.root, project_root=root, record=False)
 
     if cleanup:
         _remove_scaffolding(library, result)
 
-    _record(Path(project_root) if project_root is not None else library.root.parent, library, result)
+    _record(root, library, result)
 
     return result
+
+
+def _previous(project_root, name, destination):
+    """
+    The record of this library's last install, when it went into this folder.
+
+    Installed somewhere else, it is a separate copy, and nothing of it is moved
+    or removed from here.
+    """
+    entry = installed_libraries(project_root).get(name)
+
+    if not isinstance(entry, dict) or not isinstance(entry.get("folder"), str):
+        return None
+
+    try:
+        same = (Path(project_root) / entry["folder"]).resolve() == Path(destination).resolve()
+    except OSError:
+        return None
+
+    return entry if same else None
+
+
+def _earlier_copy(previous, project_root, target):
+    """
+    Where the last install put the user's copy of this file, if that is
+    somewhere else and it is still there.
+    """
+    if previous is None:
+        return None
+
+    for relative in previous.get("once") or []:
+        earlier = Path(project_root) / relative
+
+        if earlier.name == target.name and earlier.resolve() != target.resolve() and earlier.is_file():
+            return earlier
+
+    return None
+
+
+def _same_content(path, other):
+    """Whether two files hold the same bytes. The same file counts, of course."""
+    try:
+        return path.resolve() == other.resolve() or path.read_bytes() == other.read_bytes()
+    except OSError:
+        return False
+
+
+def _drop_stale(previous, project_root, destination, result):
+    """
+    Remove the library's own files that the last install wrote and this one did not.
+
+    Only files the record lists as the library's, and only inside its folder.
+    The user's files are recorded apart from those, and anything the user added
+    was never recorded at all, so neither can end up here.
+    """
+    current = {p.resolve() for p in result.installed + result.created + result.kept}
+
+    for relative in previous.get("files") or []:
+        old = Path(project_root) / relative
+
+        try:
+            resolved = old.resolve()
+        except OSError:
+            continue
+
+        if resolved in current or not _within(resolved, destination) or not old.is_file():
+            continue
+
+        try:
+            _unlink(old)
+        except OSError:
+            # A file the IDE holds open stays. Better than failing the update,
+            # and it is not reported as removed.
+            continue
+
+        result.dropped.append(old)
+        _prune(old.parent, destination)
+
+
+def _within(path, root):
+    """Whether path is inside root, not root itself. 3.8 has no is_relative_to."""
+    try:
+        Path(path).relative_to(root)
+    except ValueError:
+        return False
+
+    return Path(path) != Path(root)
+
+
+def _prune(folder, stop):
+    """Remove folders left empty, up to but not including stop."""
+    folder = Path(folder)
+
+    while _within(folder, stop):
+        try:
+            folder.rmdir()
+        except OSError:
+            break
+
+        folder = folder.parent
 
 
 def _remove_scaffolding(library, result):

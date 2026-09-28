@@ -107,8 +107,19 @@ def _print_files(result, root):
     for path in result.created:
         print(console.item("created", "yours to edit", _show(path, root), console.CYAN))
 
+    moved_to = {new for _, new in result.moved}
+
     for path in result.kept:
-        print(console.item("kept", "not overwritten", _show(path, root), console.YELLOW))
+        if path not in moved_to:
+            print(console.item("kept", "not overwritten", _show(path, root), console.YELLOW))
+
+    for old, new in result.moved:
+        print(console.item("moved", "yours, kept as it was",
+                           f"{_show(old, root)} -> {_show(new, root)}", console.CYAN))
+
+    for path in result.dropped:
+        print(console.item("removed", "no longer part of the library", _show(path, root),
+                           console.YELLOW))
 
     if result.removed:
         print()
@@ -206,7 +217,8 @@ def _finish(library, result, project_root, only_ide):
     """The part shared by every install route."""
     _print_files(result, project_root)
 
-    outcomes = ide.integrate(project_root, library, result.destination, only=only_ide)
+    outcomes = ide.integrate(project_root, library, result.destination, only=only_ide,
+                             dropped=result.dropped)
     _print_ide(outcomes)
     _print_next(result, project_root, library)
 
@@ -450,7 +462,7 @@ def main(argv=None, library_root=None):
     parser.add_argument(
         "--ide",
         default=None,
-        choices=["cmake", "cubeide", "keil", "iar"],
+        choices=["cmake", "cubeide", "keil", "iar", "makefile"],
         help="only register with this IDE. Default is every one found.",
     )
     # -V as well, because that is what pip and python answer to.

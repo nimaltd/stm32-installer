@@ -5,7 +5,7 @@ import re
 import pytest
 
 from stm32_installer import ide, manifest
-from stm32_installer.ide import cmake, cubeide, iar, keil
+from stm32_installer.ide import cmake, cubeide, iar, keil, makefile
 
 
 def _install(library_factory, project_root, **kwargs):
@@ -806,3 +806,247 @@ def test_a_header_only_library_gets_no_empty_group(backend, where, library, proj
     assert second.status == ide.ALREADY
     assert "demo" in text, "the include path is there"
     assert text.count(">demo<") == 0, "but no group was created for it"
+
+
+# ----------------------------------------------------------------------------
+# Updates: Keil and IAR name every file, so they have to follow a move.
+# ----------------------------------------------------------------------------
+
+_KEIL = ("keil", "MDK/Proj.uvprojx")
+_IAR = ("iar", "EWARM/Proj.ewp")
+
+# A per-file setting stored inside an entry, which only survives an update that
+# changes the entry's path in place rather than removing it and adding another.
+_OPTION = {
+    "keil": ("<FilePath>..\\demo\\demo.c</FilePath>",
+             "<FilePath>..\\demo\\demo.c</FilePath>\n"
+             "              <FileOption><IncludeInBuild>0</IncludeInBuild></FileOption>",
+             "<IncludeInBuild>0</IncludeInBuild>"),
+    "iar": ("<name>$PROJ_DIR$\\..\\demo\\demo.c</name>",
+            "<name>$PROJ_DIR$\\..\\demo\\demo.c</name>\n"
+            "            <excluded><configuration>Debug</configuration></excluded>",
+            "<configuration>Debug</configuration>"),
+}
+
+_PATHS = {
+    "keil": ("<FilePath>..\\demo\\demo.c</FilePath>", "<FilePath>..\\demo\\src\\demo.c</FilePath>"),
+    "iar": ("<name>$PROJ_DIR$\\..\\demo\\demo.c</name>", "<name>$PROJ_DIR$\\..\\demo\\src\\demo.c</name>"),
+}
+
+_GROUP = {"keil": "<GroupName>demo</GroupName>", "iar": "<name>demo</name>"}
+
+
+@pytest.mark.parametrize("backend, where", [_KEIL, _IAR])
+def test_an_update_moves_an_entry_with_its_file(backend, where, library, project, tmp_path):
+    """
+    The library's code moved into src/. The entry follows it, in place.
+
+    Adding a second group for the new path would leave the old entry pointing
+    at a file that is gone, and a per-file setting the user made on it lost.
+    """
+    root = project(keil=True, iar=True)
+    old, destination = _install(library, root, root=tmp_path / "v1")
+    new, _ = _install(library, root, root=tmp_path / "v2", install={"layout": "mirror"})
+    path = root / where
+
+    getattr(ide, backend).integrate(path, old, destination, root)
+    anchor, with_option, option = _OPTION[backend]
+    path.write_text(path.read_text(encoding="utf-8").replace(anchor, with_option), encoding="utf-8")
+
+    outcome = getattr(ide, backend).integrate(path, new, destination, root, [destination / "demo.c"])
+    text = path.read_text(encoding="utf-8")
+    before, after = _PATHS[backend]
+
+    assert outcome.status == ide.CHANGED
+    assert text.count(after) == 1
+    assert before not in text
+    assert text.count(_GROUP[backend]) == 1, "a second group was added"
+    assert option in text, "the per-file setting was lost"
+
+    again = getattr(ide, backend).integrate(path, new, destination, root)
+
+    assert again.status == ide.ALREADY
+
+
+def test_iar_moves_the_ewt_entry_too(library, project, tmp_path):
+    root = project(iar=True)
+    old, destination = _install(library, root, root=tmp_path / "v1")
+    new, _ = _install(library, root, root=tmp_path / "v2", install={"layout": "mirror"})
+    ewp = root / "EWARM" / "Proj.ewp"
+
+    iar.integrate(ewp, old, destination, root)
+    iar.integrate(ewp, new, destination, root, [destination / "demo.c"])
+    ewt = (root / "EWARM" / "Proj.ewt").read_text(encoding="utf-8")
+
+    assert "$PROJ_DIR$\\..\\demo\\src\\demo.c" in ewt
+    assert "$PROJ_DIR$\\..\\demo\\demo.c" not in ewt
+
+
+@pytest.mark.parametrize("backend, where", [_KEIL, _IAR])
+def test_an_update_removes_the_entry_of_a_file_that_is_gone(backend, where, library, project, tmp_path):
+    """Left in, the entry names a file that no longer exists, and the build fails."""
+    root = project(keil=True, iar=True)
+    old, destination = _install(library, root, root=tmp_path / "v1", sources=("src/demo.c", "src/extra.c"))
+    new, _ = _install(library, root, root=tmp_path / "v2")
+    path = root / where
+
+    getattr(ide, backend).integrate(path, old, destination, root)
+    assert "extra.c" in path.read_text(encoding="utf-8")
+
+    outcome = getattr(ide, backend).integrate(path, new, destination, root, [destination / "extra.c"])
+    text = path.read_text(encoding="utf-8")
+
+    assert outcome.status == ide.CHANGED
+    assert "extra.c" not in text
+    assert "demo.c" in text
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("backend, where", [_KEIL, _IAR])
+def test_a_file_the_library_gained_joins_its_group(backend, where, newline, library, project, tmp_path):
+    """
+    A new version with one more .c file. It goes into the group already there.
+
+    Only a library the project has none of gets a new group, so an update used
+    to see its old file, add nothing, and leave the new one out of the build.
+    """
+    root = project(keil=True, iar=True, newline=newline)
+    old, destination = _install(library, root, root=tmp_path / "v1")
+    new, _ = _install(library, root, root=tmp_path / "v2", sources=("src/demo.c", "src/extra.c"))
+    path = root / where
+
+    getattr(ide, backend).integrate(path, old, destination, root)
+    raw = path.read_bytes().decode("utf-8").replace(">demo<", ">My own name<")
+    path.write_bytes(raw.encode("utf-8"))
+
+    getattr(ide, backend).integrate(path, new, destination, root)
+    text = path.read_bytes().decode("utf-8")
+
+    assert text.count("extra.c<") == (2 if backend == "keil" else 1)
+    assert ">demo<" not in text, "a new group was added instead of using the renamed one"
+    assert text.index("extra.c") > text.index("demo.c")
+    assert text.count("\n") == text.count("\r\n") or newline == "\n", "a bare line feed went into a CRLF file"
+
+
+# ----------------------------------------------------------------------------
+# A CubeMX Makefile.
+# ----------------------------------------------------------------------------
+
+
+def _makefile_list(text, name):
+    """The entries of one list in a Makefile, in order, and the raw lines they came from."""
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith(f"{name} ="))
+    end = start
+
+    while lines[end].rstrip().endswith("\\"):
+        end += 1
+
+    body = lines[start + 1:end + 1]
+
+    return [line.rstrip().rstrip("\\").strip() for line in body], body
+
+
+def test_a_cubemx_makefile_is_recognised(project):
+    root = project(makefile=True)
+
+    assert [backend.NAME for backend, _ in ide.detect(root)] == ["Makefile"]
+
+
+def test_a_makefile_that_cubemx_did_not_write_is_left_alone(project):
+    """Plenty of projects have a Makefile. Only one with C_SOURCES is CubeMX's."""
+    root = project()
+    (root / "Makefile").write_text("all:\n\tgcc main.c\n", encoding="utf-8")
+
+    assert ide.detect(root) == []
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_the_makefile_gets_the_sources_and_the_include_folder(newline, library, project):
+    root = project(makefile=True, newline=newline)
+    lib, destination = _install(library, root)
+    path = root / "Makefile"
+
+    outcome = makefile.integrate(path, lib, destination, root)
+    raw = path.read_bytes().decode("utf-8")
+    sources, lines = _makefile_list(raw.replace("\r\n", "\n"), "C_SOURCES")
+    includes, _ = _makefile_list(raw.replace("\r\n", "\n"), "C_INCLUDES")
+
+    assert outcome.status == ide.CHANGED
+    assert sources[-1] == "demo/demo.c"
+    assert includes[-1] == "-Idemo"
+    # The old last line gained a backslash and the new one has none, or make
+    # would join the list to whatever follows it.
+    assert lines[-2].endswith("\\")
+    assert not lines[-1].endswith("\\")
+    assert raw.count("\n") == raw.count("\r\n") or newline == "\n"
+
+
+def test_the_makefile_is_left_alone_on_a_second_run(library, project):
+    root = project(makefile=True)
+    lib, destination = _install(library, root)
+    path = root / "Makefile"
+
+    makefile.integrate(path, lib, destination, root)
+    before = path.read_text(encoding="utf-8")
+    second = makefile.integrate(path, lib, destination, root)
+
+    assert second.status == ide.ALREADY
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_a_makefile_entry_follows_its_file_on_an_update(library, project, tmp_path):
+    root = project(makefile=True)
+    old, destination = _install(library, root, root=tmp_path / "v1")
+    new, _ = _install(library, root, root=tmp_path / "v2", install={"layout": "mirror"})
+    path = root / "Makefile"
+
+    makefile.integrate(path, old, destination, root)
+    makefile.integrate(path, new, destination, root, [destination / "demo.c"])
+    text = path.read_text(encoding="utf-8")
+    sources, _ = _makefile_list(text, "C_SOURCES")
+    includes, _ = _makefile_list(text, "C_INCLUDES")
+
+    assert "demo/src/demo.c" in sources
+    assert "demo/demo.c" not in sources
+    assert "-Idemo/inc" in includes
+
+
+def test_a_makefile_entry_moves_where_it_stands(library, project, tmp_path):
+    """
+    The line changes in place. Removing it and adding the new one at the end
+    would move it past the lines the user added after it, and reorder the list.
+    """
+    root = project(makefile=True)
+    old, destination = _install(library, root, root=tmp_path / "v1")
+    new, _ = _install(library, root, root=tmp_path / "v2", install={"layout": "mirror"})
+    path = root / "Makefile"
+
+    makefile.integrate(path, old, destination, root)
+    text = path.read_text(encoding="utf-8")
+    path.write_text(text.replace("demo/demo.c\n", "demo/demo.c \\\nCore/Src/app.c\n"), encoding="utf-8")
+
+    makefile.integrate(path, new, destination, root, [destination / "demo.c"])
+    sources, _ = _makefile_list(path.read_text(encoding="utf-8"), "C_SOURCES")
+
+    assert sources[-2:] == ["demo/src/demo.c", "Core/Src/app.c"]
+
+
+def test_a_makefile_list_stays_whole_when_its_last_entry_goes(library, project, tmp_path):
+    """
+    The library's file was the last in the list. With its line gone, the line
+    now last must lose its backslash, or the list runs on into the next line.
+    """
+    root = project(makefile=True)
+    old, destination = _install(library, root, root=tmp_path / "v1", sources=("src/demo.c", "src/extra.c"))
+    new, _ = _install(library, root, root=tmp_path / "v2")
+    path = root / "Makefile"
+
+    makefile.integrate(path, old, destination, root)
+    makefile.integrate(path, new, destination, root, [destination / "extra.c"])
+    sources, lines = _makefile_list(path.read_text(encoding="utf-8"), "C_SOURCES")
+
+    assert sources[-1] == "demo/demo.c"
+    assert "demo/extra.c" not in sources
+    assert not lines[-1].endswith("\\")
+    assert "# ASM sources" in path.read_text(encoding="utf-8")

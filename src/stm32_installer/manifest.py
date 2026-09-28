@@ -64,6 +64,10 @@ _VERSION_TAG = re.compile(r"@version\s+(\S+)")
 
 UPDATE_COMMAND = "pip install --upgrade stm32-installer"
 
+# What a compiler takes. Keil, IAR and a Makefile name each of these files one
+# by one, so this also decides which files an update has to tell them about.
+COMPILED = (".c", ".cpp", ".cc", ".cxx", ".s", ".asm")
+
 
 def _version_tuple(text):
     """(1, 2, 0) from "1.2.0", or None when it is not three whole numbers."""
@@ -416,12 +420,10 @@ class Manifest:
         file tree and is handed to the compiler. A README that reached it by way
         of a mistyped manifest would be visible, confusing, and a build error.
         """
-        wanted = (".c", ".cpp", ".cc", ".cxx", ".s", ".asm")
-
         return [
             entry.destination
             for entry in list(self.sources) + list(self.once)
-            if Path(entry.destination).suffix.lower() in wanted
+            if Path(entry.destination).suffix.lower() in COMPILED
         ]
 
     @property

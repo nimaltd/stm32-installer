@@ -362,3 +362,45 @@ def test_the_version_is_shown_and_nothing_else_happens(flag, no_network, capsys)
 
     assert stopped.value.code == 0
     assert capsys.readouterr().out == f"stm32-installer {__version__}\n"
+
+
+# ----------------------------------------------------------------------------
+# An update to a version that keeps its code in src/.
+# ----------------------------------------------------------------------------
+
+
+def test_an_update_to_a_src_layout_keeps_the_project_building(library, project, tmp_path, no_network, capsys):
+    """
+    The whole route, the way sequencer went from 2.0.0 to the next release.
+
+    The user's settings move with their file, the old copies of the code go,
+    and Keil and the Makefile name the new place instead of a file that is gone.
+    """
+    root = project(keil=True, makefile=True)
+    first = library(root=tmp_path / "Downloads" / "v1" / "demo-master",
+                    headers=["src/demo.h"], sources=["src/demo.c"])
+    second = library(
+        root=tmp_path / "Downloads" / "v2" / "demo-master",
+        headers=["src/demo.h"],
+        sources=["src/demo.c"],
+        once=[{"from": "template/demo_config.h", "to": "src/demo_config.h"}],
+        install={"layout": "mirror"},
+    )
+
+    assert cli.main([str(first), "--project", str(root), "--dir", "demo"]) == 0
+    (root / "demo" / "demo_config.h").write_text("#define DEMO_SIZE 64\n", encoding="utf-8")
+    capsys.readouterr()
+
+    assert cli.main([str(second), "--project", str(root), "--dir", "demo"]) == 0
+    out = capsys.readouterr().out
+    keil = (root / "MDK" / "Proj.uvprojx").read_text(encoding="utf-8")
+    make = (root / "Makefile").read_text(encoding="utf-8")
+
+    assert "demo/demo_config.h -> demo/src/demo_config.h" in out
+    assert "removed" in out and "demo/demo.c" in out
+    assert "Updated demo in Proj.uvprojx" in out
+    assert "Updated demo in the Makefile" in out
+    assert (root / "demo" / "src" / "demo_config.h").read_text(encoding="utf-8") == "#define DEMO_SIZE 64\n"
+    assert not (root / "demo" / "demo.c").exists()
+    assert "..\\demo\\src\\demo.c" in keil and "..\\demo\\demo.c" not in keil
+    assert "demo/src/demo.c" in make and "demo/demo.c" not in make
