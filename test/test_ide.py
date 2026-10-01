@@ -1,11 +1,12 @@
 """Tests for registering a library with each IDE."""
 
 import re
+from datetime import datetime
 
 import pytest
 
 from stm32_installer import ide, manifest
-from stm32_installer.ide import cmake, cubeide, iar, keil, makefile
+from stm32_installer.ide import base, cmake, cubeide, iar, keil, makefile
 
 
 def _install(library_factory, project_root, **kwargs):
@@ -176,6 +177,27 @@ def test_every_edit_leaves_a_backup(library, project):
     assert outcome.backup is not None
     assert outcome.backup.is_file()
     assert "add_executable" in outcome.backup.read_text(encoding="utf-8")
+
+
+def test_two_backups_in_one_second_are_both_kept(tmp_path, monkeypatch):
+    # A library and the one it needs, installed in one run within a second.
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 1, 22, 4, 15)
+
+    monkeypatch.setattr(base, "datetime", Frozen)
+    project_file = tmp_path / "CMakeLists.txt"
+
+    project_file.write_text("before either\n", encoding="utf-8")
+    first = base.backup(project_file)
+    project_file.write_text("after the first\n", encoding="utf-8")
+    second = base.backup(project_file)
+
+    assert first != second
+    assert first.read_text(encoding="utf-8") == "before either\n"
+    assert second.read_text(encoding="utf-8") == "after the first\n"
+    assert base.is_backup(second)
 
 
 def test_integrate_runs_every_backend_that_matches(library, project):
