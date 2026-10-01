@@ -308,12 +308,63 @@ class Peripheral:
         return f"Peripheral({self.type} x{self.count})"
 
 
+class Dependency:
+    """
+    Another library this one needs, and the oldest version of it that will do.
+
+    Written in library.yml as "osal" or "osal >= 1.1.0", with an owner in front
+    when it is not a NimaLTD library: "someone/osal >= 1.1.0".
+    """
+
+    _FORM = re.compile(r"^([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?)\s*(?:>=\s*(\S+))?$")
+
+    def __init__(self, text):
+        found = self._FORM.match(str(text).strip())
+
+        if not found:
+            raise ManifestError(
+                f'requires.libraries has "{text}". Write a library as its name, '
+                'like "osal", or with the oldest version that will do, like "osal >= 1.1.0".'
+            )
+
+        self.source = found.group(1)
+        self.name = self.source.split("/")[-1]
+        self.minimum_text = found.group(2)
+        self.minimum = None
+
+        if self.minimum_text is not None:
+            self.minimum = _version_tuple(self.minimum_text)
+
+            if self.minimum is None:
+                raise ManifestError(
+                    f'requires.libraries has "{text}". The version is three numbers, like 1.1.0.'
+                )
+
+    def satisfied_by(self, version):
+        """Whether a library at this version will do. Any version will, with no minimum."""
+        if self.minimum is None:
+            return True
+
+        have = _version_tuple(version) if version else None
+
+        return have is not None and have >= self.minimum
+
+    def __str__(self):
+        if self.minimum_text is None:
+            return self.name
+
+        return f"{self.name} >= {self.minimum_text}"
+
+    def __repr__(self):
+        return f"Dependency({self})"
+
+
 class Requirements:
     """Everything a library needs from the project it is dropped into."""
 
     def __init__(self, data):
         data = data or {}
-        self.libraries = [str(x) for x in (data.get("libraries") or [])]
+        self.libraries = [Dependency(x) for x in (data.get("libraries") or [])]
         self.hal = bool(data.get("hal", True))
         self.cmsis = bool(data.get("cmsis", False))
         self.rtos = str(data.get("rtos", "none")).lower()

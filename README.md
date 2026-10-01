@@ -53,6 +53,14 @@ stm32-installer D:/Downloads/example-master.zip
 
 Neither line needs the internet. The installer needs nothing but itself, and the library comes from the zip.
 
+If the library needs another one, such as `osal`, download that zip as well and give both on one line:
+
+```bash
+stm32-installer D:/Downloads/example-master.zip D:/Downloads/osal-master.zip
+```
+
+Forget it, and the installer stops before writing anything, naming the zip it is missing.
+
 ### A private repository
 
 Give the installer a GitHub token that can read the repository, in the `GITHUB_TOKEN` environment variable, and install by name as usual.
@@ -84,7 +92,7 @@ The token is read from the environment only, never from the command line, where 
 
 ### What to install
 
-The one argument can be any of these:
+The argument can be any of these, and you can give several at once:
 
 | You have | You type |
 |---|---|
@@ -102,8 +110,8 @@ The zip does not need unpacking first. If you did unpack it with Windows' **Extr
 
 | Option | What it does |
 |---|---|
-| `--ref v2.0.0` | A tag, a branch or a commit to take from GitHub. `master` when not given |
-| `--dir Libs/example` | The folder of your project to install into. Asked for when not given, with the library's name as the answer if you just press Enter |
+| `--ref v2.0.0` | A tag, a branch or a commit to take from GitHub. `master` when not given. It applies to the libraries you name, and a library one of them needs always comes from its `master` |
+| `--dir Libs/example` | The folder of your project to install into, for one library. Asked for when not given, with the library's name as the answer if you just press Enter, or the folder it is already in |
 | `--project D:/Work/MyBoard` | Your project's root, when you are not running from it |
 | `--ide cubeide` | Register with this IDE only: `cmake`, `cubeide`, `keil`, `iar` or `makefile`. Every one found, when not given |
 | `--version` | Show which version of the installer you have, and do nothing else |
@@ -127,10 +135,10 @@ stm32-installer nimaltd/example --ref 00949e695e16   # an exact commit
 Without `--dir`, you are asked where the library should go:
 
 ```
-Folder to install into [example]:
+Folder to install example into [example]:
 ```
 
-Press Enter for the default. In a script or on a build server, where nobody is there to answer, the default is taken without asking, rather than waiting for ever.
+Press Enter for the default: the library's name, or the folder it is already in when this is an update. In a script or on a build server, where nobody is there to answer, the default is taken without asking, rather than waiting for ever.
 
 ### Updating a library
 
@@ -155,6 +163,26 @@ Files
   removed example/example.h  no longer part of the library
   removed example/example.c  no longer part of the library
 ```
+
+### A library that needs another
+
+Some libraries build on another one, such as `osal` for the RTOS. You install only the one you want, and what it needs goes in first:
+
+```
+example 2.0.0 needs osal >= 1.0.0, which is not in this project. Installing osal first.
+...
+Done. #include "osal.h" and you are away.
+...
+Done. #include "example.h" and you are away.
+```
+
+You are asked for its folder like any library. Install a second library that needs `osal`, and the one already in your project is used:
+
+```
+spif 3.0.0 needs osal >= 1.0.0. osal 1.0.0 is already in this project, kept.
+```
+
+Nothing is asked about it then. If a library needs a newer `osal` than the one you have, it is updated where it is, and your `osal_config.h` is kept as always. Everything is fetched before anything is installed, so when a library cannot be had, your project is left as it was.
 
 ### What you see
 
@@ -259,7 +287,7 @@ provides: []            # what this gives other libraries. An RTOS says [rtos]
 
 requires:
   installer: 1.1.0      # the oldest stm32-installer that reads this file
-  libraries: []         # other NimaLTD libraries, by name
+  libraries: []         # other libraries this one needs, like [osal >= 1.0.0]
   hal: true
   cmsis: true
   rtos: none            # none, optional, any, freertos, cmsis-os2, threadx
@@ -307,6 +335,18 @@ There is no `version` in it. The installer reads the version from the `@version`
 ```
 
 `requires.installer` is the oldest stm32-installer that reads the file correctly. It is checked before anything else in the file is read, so when a manifest starts using something only a newer installer understands, raising this makes an older one stop with a message saying to update, rather than read the file wrongly without a word. Write it as three numbers, `1.1.0`: unquoted, YAML reads `1.10` as the decimal number `1.1`, and that is refused.
+
+`requires.libraries` lists the libraries yours needs, each as its name, or its name with the oldest version that will do:
+
+```yaml
+requires:
+  installer: 1.5.0      # the first that installs them, rather than only naming them
+  libraries:
+    - osal >= 1.0.0     # a NimaLTD library, from github.com/nimaltd/osal
+    - someone/lib       # anyone else's, by owner and name
+```
+
+What is missing or older than that goes in first, from its `master`. What is already in the project at a version that will do is left alone. An installer older than 1.5.0 only names them at the end and installs nothing, which is why `requires.installer` goes up with the first library that lists any.
 
 A file listed under `once` is copied only when it is missing, so the user's own edits survive every update. It keeps its own name unless you give it a `to`, and it lands at the top of the library's folder whatever the layout. With `mirror`, give a configuration header a `to` that puts it beside the header including it, as above. At the top, the include path the layout gives would not reach it.
 
