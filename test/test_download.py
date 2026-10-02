@@ -9,6 +9,7 @@ so a test can see where each request went and what it carried with it.
 import io
 import types
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import pytest
@@ -28,19 +29,32 @@ class _Response(io.BytesIO):
         self.close()
 
 
+def _ref_of(url):
+    """The branch a raw, contents or tree URL asks for."""
+    if "?ref=" in url:
+        return urllib.parse.unquote(url.split("?ref=")[1])
+
+    if "/git/trees/" in url:
+        return url.split("/git/trees/")[1].split("?")[0]
+
+    return url.split("/")[5]
+
+
 @pytest.fixture
 def github(monkeypatch):
     """
     Stand in for GitHub, with no token set.
 
     Serves each file whose URL ends in a name from files, answers 404 for
-    anything else, or answers status for everything when a test sets it. seen
+    anything else, or answers status for everything when a test sets it. When a
+    test sets branches, only those exist, and any other ref is a 404. seen
     collects (url, headers) for every request.
     """
     state = types.SimpleNamespace(
         files={"library.yml": MANIFEST, "demo.h": b"/* h */\n", "demo.c": b"/* c */\n"},
         seen=[],
         status=None,
+        branches=None,
     )
 
     def fake_open(request, timeout=None):
@@ -48,6 +62,9 @@ def github(monkeypatch):
 
         if state.status is not None:
             raise urllib.error.HTTPError(request.full_url, state.status, "Refused", {}, None)
+
+        if state.branches is not None and _ref_of(request.full_url) not in state.branches:
+            raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, None)
 
         for name, body in state.files.items():
             if request.full_url.split("?")[0].endswith("/" + name):
@@ -68,7 +85,7 @@ def test_without_a_token_nothing_rides_along(github, tmp_path):
     download.fetch("someone/demo", destination=tmp_path / "lib")
 
     assert github.seen, "nothing was fetched"
-    assert all(url.startswith("https://raw.githubusercontent.com/someone/demo/master/") for url, _ in github.seen)
+    assert all(url.startswith("https://raw.githubusercontent.com/someone/demo/main/") for url, _ in github.seen)
     assert all("Authorization" not in headers for _, headers in github.seen)
     assert (tmp_path / "lib" / "demo.c").read_bytes() == b"/* c */\n"
 
@@ -175,3 +192,57 @@ def test_a_branch_with_a_slash_stays_one_ref(github, monkeypatch, tmp_path):
     url, _ = github.seen[0]
 
     assert url.endswith("/contents/library.yml?ref=feature%2Fx")
+
+
+# ----------------------------------------------------------------------------
+# With no ref, main and then master
+
+
+def test_no_ref_takes_main_and_never_asks_master(github, tmp_path):
+    github.branches = {"main", "master"}
+
+    download.fetch("someone/demo", destination=tmp_path / "lib")
+
+    assert {_ref_of(url) for url, _ in github.seen} == {"main"}
+
+
+def test_no_ref_falls_back_to_master_for_every_file(github, tmp_path):
+    """Found on master, so the files come from master too, not from a main that is not there."""
+    github.branches = {"master"}
+
+    download.fetch("someone/demo", destination=tmp_path / "lib")
+
+    assert _ref_of(github.seen[0][0]) == "main"
+    assert {_ref_of(url) for url, _ in github.seen[1:]} == {"master"}
+    assert (tmp_path / "lib" / "demo.c").read_bytes() == b"/* c */\n"
+
+
+def test_a_ref_given_is_the_only_one_asked(github, tmp_path):
+    github.branches = {"main"}
+
+    with pytest.raises(download.DownloadError):
+        download.fetch("someone/demo", ref="master", destination=tmp_path / "lib")
+
+    assert {_ref_of(url) for url, _ in github.seen} == {"master"}
+
+
+def test_only_a_404_moves_on_to_master(github, monkeypatch, tmp_path):
+    """A refused token would be refused on master too, and must be reported as itself."""
+    monkeypatch.setenv("GITHUB_TOKEN", "t0ken")
+    github.status = 403
+
+    with pytest.raises(download.DownloadError) as raised:
+        download.fetch("someone/private", destination=tmp_path / "lib")
+
+    assert len(github.seen) == 1
+    assert "HTTP 403" in str(raised.value)
+
+
+def test_neither_branch_names_both(github, tmp_path):
+    github.branches = {"develop"}
+
+    with pytest.raises(download.DownloadError) as raised:
+        download.fetch("someone/demo", destination=tmp_path / "lib")
+
+    assert "main or master" in str(raised.value)
+    assert "GITHUB_TOKEN" in str(raised.value)

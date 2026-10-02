@@ -38,7 +38,7 @@ def github(monkeypatch):
     repos = {}
     fetched = []
 
-    def fake_fetch(source, ref="master", destination=None):
+    def fake_fetch(source, ref=None, destination=None):
         fetched.append((source, ref))
 
         if source not in repos:
@@ -141,7 +141,7 @@ def test_what_a_library_needs_is_installed_first(library, project, tmp_path, git
     known = installer.installed_libraries(root)
 
     assert code == 0
-    assert fetched == [("nimaltd/ee24", "master"), ("osal", "master")]
+    assert fetched == [("nimaltd/ee24", None), ("osal", None)], "a dependency took a ref"
     assert (root / "osal" / "osal.h").is_file(), "the folder question defaults to the name"
     assert (root / "ee24" / "ee24.h").is_file()
     assert known["osal"]["folder"] == "osal" and known["ee24"]["folder"] == "ee24"
@@ -167,7 +167,7 @@ def test_what_is_already_there_is_kept_and_nobody_is_asked(
 
     assert code == 0
     assert "osal 1.2.0 is already in this project, kept" in out
-    assert ("osal", "master") not in fetched, "fetched a library that was already there"
+    assert ("osal", None) not in fetched, "fetched a library that was already there"
     assert not (root / "osal").exists(), "a second copy of osal went in"
     assert installer.installed_libraries(root)["osal"]["folder"] == "Libs/osal"
     assert asked == []
@@ -294,7 +294,7 @@ def test_a_library_two_others_need_goes_in_once(library, project, tmp_path, gith
     out = capsys.readouterr().out
 
     assert code == 0
-    assert fetched.count(("osal", "master")) == 1
+    assert fetched.count(("osal", None)) == 1
     assert out.count('#include "osal.h"') == 1
     assert (root / "spif" / "spif.h").is_file()
 

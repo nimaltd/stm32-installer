@@ -205,7 +205,7 @@ def test_a_name_goes_to_github(library, project, tmp_path, monkeypatch):
     staged = library(root=tmp_path / "staged")
     calls = []
 
-    def fake_fetch(source, ref="master", destination=None):
+    def fake_fetch(source, ref=None, destination=None):
         calls.append((source, ref))
         return staged
 

@@ -6,8 +6,8 @@ One argument says what to install, and it can be any of these:
     stm32-installer nimaltd/example                    GitHub, by owner and name
     stm32-installer example                            GitHub, owner nimaltd
     stm32-installer https://github.com/nimaltd/example GitHub, by address
-    stm32-installer D:/Downloads/example-master.zip    the zip GitHub hands out
-    stm32-installer D:/Downloads/example-master        a folder anywhere on disk
+    stm32-installer D:/Downloads/example-main.zip      the zip GitHub hands out
+    stm32-installer D:/Downloads/example-main          a folder anywhere on disk
     stm32-installer example                            a folder already in the project
 
 A path that exists always wins over a name, so a folder called "example" in the
@@ -421,14 +421,14 @@ def _fetch_dependency(dependency, needed_by, staged):
     print(console.note(f"{needed_by} needs {dependency}. Fetching {dependency.source} ..."))
 
     try:
-        root = download.fetch(dependency.source, ref="master")
+        root = download.fetch(dependency.source)
     except download.DownloadError as error:
         raise _PlanError(
             f"{needed_by} needs {dependency}, which is not in this project, and it could "
             f"not be fetched: {error}\n"
             f"Without the internet, download {dependency.name} as well, and give both "
             f"zips on one line:\n"
-            f"    stm32-installer {needed_by}-master.zip {dependency.name}-master.zip"
+            f"    stm32-installer {needed_by}-main.zip {dependency.name}-main.zip"
         ) from error
 
     staged.append(root)
@@ -673,9 +673,10 @@ def main(argv=None, library_root=None):
     )
     parser.add_argument(
         "--ref",
-        default="master",
-        help="branch, tag or commit to fetch for the libraries named here. Default master. "
-        "A library one of them needs is always fetched from its master.",
+        default=None,
+        help="branch, tag or commit to fetch for the libraries named here. Default main, "
+        "or master when there is no main. A library one of them needs always comes from "
+        "its main or master.",
     )
     parser.add_argument("--dir", dest="folder", default=None, help="folder to install into.")
     parser.add_argument(

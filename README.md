@@ -48,7 +48,7 @@ That saves one file, such as `stm32_installer-1.1.2-py3-none-any.whl`, where the
 
 ```bash
 pip install stm32_installer-1.1.2-py3-none-any.whl
-stm32-installer D:/Downloads/example-master.zip
+stm32-installer D:/Downloads/example-main.zip
 ```
 
 Neither line needs the internet. The installer needs nothing but itself, and the library comes from the zip.
@@ -56,7 +56,7 @@ Neither line needs the internet. The installer needs nothing but itself, and the
 If the library needs another one, such as `osal`, download that zip as well and give both on one line:
 
 ```bash
-stm32-installer D:/Downloads/example-master.zip D:/Downloads/osal-master.zip
+stm32-installer D:/Downloads/example-main.zip D:/Downloads/osal-main.zip
 ```
 
 Forget it, and the installer stops before writing anything, naming the zip it is missing.
@@ -98,19 +98,19 @@ The argument can be any of these, and you can give several at once:
 |---|---|
 | Nothing yet, and internet | `stm32-installer nimaltd/example` |
 | The library's GitHub address | `stm32-installer https://github.com/nimaltd/example` |
-| The zip from GitHub's **Download ZIP** | `stm32-installer D:/Downloads/example-master.zip` |
-| That zip unpacked, anywhere on disk | `stm32-installer D:/Downloads/example-master` |
+| The zip from GitHub's **Download ZIP** | `stm32-installer D:/Downloads/example-main.zip` |
+| That zip unpacked, anywhere on disk | `stm32-installer D:/Downloads/example-main` |
 | The library's folder, already inside your project | `stm32-installer example` |
 
 A bare name like `example` means `nimaltd/example` on GitHub, unless a folder of that name exists where you run it, in which case the folder is used. A path that does not exist is reported as missing rather than looked up on GitHub, so a typo in `D:/Downloads/...` gets a straight answer.
 
-The zip does not need unpacking first. If you did unpack it with Windows' **Extract All**, which puts `example-master` inside another `example-master`, either folder works.
+The zip does not need unpacking first. If you did unpack it with Windows' **Extract All**, which puts `example-main` inside another `example-main`, either folder works. A repository still on `master` gives `example-master`, which works the same.
 
 ### Options
 
 | Option | What it does |
 |---|---|
-| `--ref v2.0.0` | A tag, a branch or a commit to take from GitHub. `master` when not given. It applies to the libraries you name, and a library one of them needs always comes from its `master` |
+| `--ref v2.0.0` | A tag, a branch or a commit to take from GitHub. When not given, `main`, or `master` for a repository that has no `main`. It applies to the libraries you name, and a library one of them needs always comes from its `main` or `master` |
 | `--dir Libs/example` | The folder of your project to install into, for one library. Asked for when not given, with the library's name as the answer if you just press Enter, or the folder it is already in |
 | `--project D:/Work/MyBoard` | Your project's root, when you are not running from it |
 | `--ide cubeide` | Register with this IDE only: `cmake`, `cubeide`, `keil`, `iar` or `makefile`. Every one found, when not given |
@@ -189,7 +189,7 @@ Nothing is asked about it then. If a library needs a newer `osal` than the one y
 A first install from a downloaded zip, into a CubeMX project that builds with both CMake and STM32CubeIDE:
 
 ```
-Reading example-master.zip ...
+Reading example-main.zip ...
 
 example 2.0.0
 What this library does, in one line
@@ -346,7 +346,7 @@ requires:
     - someone/lib       # anyone else's, by owner and name
 ```
 
-What is missing or older than that goes in first, from its `master`. What is already in the project at a version that will do is left alone. An installer older than 1.5.0 only names them at the end and installs nothing, which is why `requires.installer` goes up with the first library that lists any.
+What is missing or older than that goes in first, from its `main`, or its `master` when it has no `main`. What is already in the project at a version that will do is left alone. An installer older than 1.5.0 only names them at the end and installs nothing, which is why `requires.installer` goes up with the first library that lists any.
 
 A file listed under `once` is copied only when it is missing, so the user's own edits survive every update. It keeps its own name unless you give it a `to`, and it lands at the top of the library's folder whatever the layout. With `mirror`, give a configuration header a `to` that puts it beside the header including it, as above. At the top, the include path the layout gives would not reach it.
 

@@ -29,6 +29,10 @@ RAW_URL = "https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}"
 CONTENTS_URL = "https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={ref}"
 TREE_URL = "https://api.github.com/repos/{owner}/{repo}/git/trees/{ref}?recursive=1"
 DEFAULT_OWNER = "nimaltd"
+
+# Tried in this order when no ref is given. GitHub names the first branch of a
+# new repository main, and older repositories are on master.
+DEFAULT_BRANCHES = ("main", "master")
 TIMEOUT_SECONDS = 30
 
 # Where a token is looked for, in this order. GitHub Actions sets the first and
@@ -44,6 +48,10 @@ RAW_MEDIA = "application/vnd.github.raw"
 
 class DownloadError(Exception):
     """A library could not be fetched, with a reason worth showing the user."""
+
+
+class NotFoundError(DownloadError):
+    """GitHub answered 404: no such file, branch or repository, or a private one."""
 
 
 class _SameHostRedirect(urllib.request.HTTPRedirectHandler):
@@ -130,16 +138,9 @@ def _fetch(owner, repo, ref, path):
             # GitHub answers a private repository it will not show you with 404,
             # the same as one that does not exist. Only the manifest is asked for
             # first, so that is where a missing token shows up.
-            hint = ""
+            hint = _private_hint(variable, token) if path == "library.yml" else ""
 
-            if path == "library.yml":
-                hint = (
-                    f" If the repository is private, the token in {variable} cannot read it."
-                    if token else
-                    " If the repository is private, set GITHUB_TOKEN to a token that can read it."
-                )
-
-            raise DownloadError(f"{path} does not exist in {owner}/{repo} at {ref}.{hint}") from error
+            raise NotFoundError(f"{path} does not exist in {owner}/{repo} at {ref}.{hint}") from error
 
         raise DownloadError(f"Could not download {path} from {owner}/{repo}: HTTP {error.code}.") from error
     except urllib.error.URLError as error:
@@ -169,6 +170,38 @@ def _listed_entries(data):
     return entries
 
 
+def _private_hint(variable, token):
+    """What to say when a manifest is not found, in case the repository is private."""
+    if token:
+        return f" If the repository is private, the token in {variable} cannot read it."
+
+    return " If the repository is private, set GITHUB_TOKEN to a token that can read it."
+
+
+def _manifest(owner, repo, ref):
+    """
+    The bytes of library.yml, and the ref they came from.
+
+    With no ref, main is tried first and then master, so a repository on either
+    branch installs without --ref. Only a 404 moves on to the next branch. Any
+    other failure, a refused token or no network, would fail the same way on
+    master, and would then be reported as the wrong problem.
+    """
+    if ref is not None:
+        return _fetch(owner, repo, ref, "library.yml"), ref
+
+    for branch in DEFAULT_BRANCHES:
+        try:
+            return _fetch(owner, repo, branch, "library.yml"), branch
+        except NotFoundError:
+            continue
+
+    raise NotFoundError(
+        f"library.yml does not exist in {owner}/{repo} on "
+        f"{' or '.join(DEFAULT_BRANCHES)}.{_private_hint(*_token())}"
+    )
+
+
 def tree(owner, repo, ref):
     """
     Every file path in the repository, from the GitHub API.
@@ -194,7 +227,7 @@ def tree(owner, repo, ref):
     return [item["path"] for item in data.get("tree", []) if item.get("type") == "blob"]
 
 
-def fetch(source, ref="master", destination=None):
+def fetch(source, ref=None, destination=None):
     """
     Download a library's manifest and the files it lists into a folder.
 
@@ -203,7 +236,7 @@ def fetch(source, ref="master", destination=None):
 
     Args:
         source: library name, "owner/name", or a GitHub URL.
-        ref: branch or tag. These repositories use master.
+        ref: branch, tag or commit. None tries main, then master.
         destination: where to write. A temporary folder when not given.
 
     Returns:
@@ -230,7 +263,8 @@ def fetch(source, ref="master", destination=None):
 
 def _fill(owner, repo, ref, root):
     """Download the manifest, then every file it lists, into root."""
-    raw = _fetch(owner, repo, ref, "library.yml")
+    # Every file then comes from the branch the manifest was found on.
+    raw, ref = _manifest(owner, repo, ref)
     (root / "library.yml").write_bytes(raw)
 
     try:
@@ -316,7 +350,7 @@ def find_root(folder):
     """
     The folder holding library.yml: the one given, or the only one inside it.
 
-    GitHub's zip holds a single top folder, example-master, and Windows' Extract
+    GitHub's zip holds a single top folder, example-main, and Windows' Extract
     All puts that inside another folder of the same name. Either is what a user
     will point at, so both have to work. None when neither holds a manifest, or
     when several subfolders do and picking one would be a guess.
