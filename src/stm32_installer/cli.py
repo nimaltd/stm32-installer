@@ -130,6 +130,14 @@ def _print_files(result, root):
         print(console.item("removed", "no longer part of the library", _show(path, root),
                            console.YELLOW))
 
+    for path, names in result.preserved:
+        print(console.item("kept", "your USER CODE " + ", ".join(names), _show(path, root),
+                           console.CYAN))
+
+    for path, saved, reason in result.backups:
+        print(console.item("saved", "", f"{_show(saved, root)}  {console.warn(reason)}",
+                           console.YELLOW))
+
     if result.removed:
         print()
         print(console.note("  Removed, since they are part of the repository, not the firmware:"))
@@ -201,7 +209,11 @@ def _print_next(result, root, library):
         print(console.good("Done."))
 
     if result.was_update:
-        print(console.note("This was an update. Code replaced, your configuration kept."))
+        print(console.note("This was an update. The library replaced, what was yours kept."))
+
+    if result.backups:
+        print(console.warn("Something of yours could not be carried over. Each copy marked saved "
+                           "holds the file as it was: take what you need from it, then delete it."))
 
     for warning in getattr(library, "warnings", []):
         print(console.note(f"  manifest: {warning}"))

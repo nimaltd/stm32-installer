@@ -142,16 +142,31 @@ Press Enter for the default: the library's name, or the folder it is already in 
 
 ### Updating a library
 
-Run the same command again. The code is replaced, and your `example_config.h` is kept, because it is yours:
+Run the same command again. Every file of the library is replaced, so an update updates, and a library you broke by accident is put right. What you wrote between `USER CODE BEGIN` and `USER CODE END` is kept, the way STM32CubeMX keeps your code when it generates again:
+
+```c
+/* USER CODE BEGIN EXAMPLE_CONFIGURATION */
+#define EXAMPLE_SIZE  32
+/* USER CODE END EXAMPLE_CONFIGURATION */
+```
 
 ```
 Files
   written example/example.h
+  written example/example_config.h
   written example/example.c
-  kept    example/example_config.h  not overwritten
+  kept    example/example_config.h  your USER CODE EXAMPLE_CONFIGURATION
 
-This was an update. Code replaced, your configuration kept.
+This was an update. The library replaced, what was yours kept.
 ```
+
+Put your settings, and anything else you add to a library file, inside those sections. Outside them, the next install replaces it. When that would lose something of yours, the file as it was is saved beside it first, and the report says why:
+
+```
+  saved   example/example.c.20261006-165940.bak  it was changed outside its USER CODE sections
+```
+
+That happens when you edited the library outside a section, when its markers no longer pair, or when the new version no longer has a section you had written in. Take what you need from the `.bak` file, then delete it. A file nobody touched is left as it is, so your build does not compile it again for nothing.
 
 When a new version keeps its files somewhere else, say in `src/`, the update moves your project along with it. Your `example_config.h` goes where the new version looks for it, with your settings still in it, rather than a fresh default turning up next to the header. Files the old version installed and the new one no longer has are removed, so an old `example.c` cannot end up compiled beside the new one. Keil, IAR and the Makefile are pointed at the new places, and a file the library gained joins its group there. Anything you put in the library's folder yourself is left alone.
 
@@ -231,7 +246,7 @@ The first line says where the library came from: `Fetching nimaltd/example ...` 
 
 CubeMX can write its Makefile again when it generates code, and the library's lines go with it. Run the installer again after that and they are back.
 
-**Never overwrites your configuration.** `example_config.h` is created once. Reinstall as often as you like: the code is replaced, your settings are not.
+**Never loses your settings.** What you write inside `USER CODE BEGIN` and `USER CODE END` survives every install. Reinstall as often as you like: the library is replaced, your sections are not, and anything else of yours that would be lost is saved to a `.bak` file first.
 
 **Leaves the file looking like you wrote it.** An added line copies the indentation, the line ending and the path separator of the lines around it. These files go into version control, so a correct edit that shows up as a whole file diff is still a bad edit.
 
@@ -312,10 +327,8 @@ files:
     - from: src/port/spi.c    # a file can say exactly where it goes, which
       to: port/spi.c          # overrides the layout for that one file
 
-once:                   # copied once, then it belongs to the user
-  - from: src/example_config.h
-    to: src/example_config.h  # beside the header that includes it
-  - from: src/example_port.c  # a .c starter works the same way
+once:                   # older libraries only: copied once, then the user's.
+  - from: src/example_port.c  # USER CODE sections, below, replace this
     to: my_port.c             # "to" only when the name should change
 
 extras:                 # copied as they are, no compiling
@@ -348,7 +361,23 @@ requires:
 
 What is missing or older than that goes in first, from its `main`, or its `master` when it has no `main`. What is already in the project at a version that will do is left alone. An installer older than 1.5.0 only names them at the end and installs nothing, which is why `requires.installer` goes up with the first library that lists any.
 
-A file listed under `once` is copied only when it is missing, so the user's own edits survive every update. It keeps its own name unless you give it a `to`, and it lands at the top of the library's folder whatever the layout. With `mirror`, give a configuration header a `to` that puts it beside the header including it, as above. At the top, the include path the layout gives would not reach it.
+### USER CODE sections
+
+Mark what the user is meant to change, the way STM32CubeMX marks its generated files. A configuration header, for instance, lists like any other header and carries its settings in a section:
+
+```c
+/* USER CODE BEGIN EXAMPLE_CONFIGURATION */
+#define EXAMPLE_SIZE  8
+/* USER CODE END EXAMPLE_CONFIGURATION */
+```
+
+Every install copies all the library's files again and carries each section's text from the user's copy into the section of the same name. So keep a section's name from one version to the next. A section a new version adds starts with what you ship in it, and what is inside a section is never changed by an update, defaults included. Each name is one word, used once per file. Markers that do not pair, a `BEGIN` with no `END` or one inside another, stop the install before anything is written.
+
+A library that moves a file from `once` into `files` this way must say `requires.installer: 1.7.0`. An older installer replaces the file without keeping its sections, and the user's settings would be lost.
+
+### once
+
+A file listed under `once` is copied only when it is missing, so the user's own edits survive every update. Libraries released before 1.7.0 use it, and it still works the same. It keeps its own name unless you give it a `to`, and it lands at the top of the library's folder whatever the layout. With `mirror`, give a configuration header a `to` that puts it beside the header including it, as above. At the top, the include path the layout gives would not reach it.
 
 The key says what happens rather than what the file is. It is usually a configuration header, but the same rule fits a port layer someone fills in, or a table they tune: anything that is the library's to start and theirs from then on.
 

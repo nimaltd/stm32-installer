@@ -1,12 +1,17 @@
 """
 Copying a library into a user's STM32 project.
 
-Two rules shape everything here.
+Three rules shape everything here.
 
-Code files are replaced on every install, so an update actually updates.
-Files listed under once are copied once and then belong to the user, so an
-update never throws away what they changed. That is usually a configuration
-header, but the rule is about ownership, not about what the file holds.
+The library's files are replaced on every install, so an update actually
+updates, and a library the user broke by accident is put right.
+
+What the user wrote between USER CODE BEGIN and USER CODE END survives that,
+carried into the new file in the section of the same name, the way STM32CubeMX
+keeps the user's code when it generates again. See usercode.py.
+
+Files listed under once are copied once and then belong to the user, for the
+libraries that still list any. Those predate the USER CODE sections.
 """
 
 import json
@@ -16,6 +21,9 @@ import stat
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+from . import usercode
+from .ide.base import backup
 
 RECORD_NAME = ".stm32-installer.json"
 
@@ -68,11 +76,20 @@ class Result:
         # last install that the new version no longer ships.
         self.moved = []
         self.dropped = []
+        # (file, [section names]) for each file whose USER CODE sections were
+        # carried into the new version.
+        self.preserved = []
+        # (file, backup, reason) for each copy put aside before something in it
+        # was replaced or removed.
+        self.backups = []
+        # What each file written holds outside its USER CODE sections, kept in
+        # the record so the next install can tell a hand edit there.
+        self.fingerprints = {}
 
     @property
     def was_update(self):
-        """True when a kept file was already there and was left alone."""
-        return bool(self.kept)
+        """True when the user's work was found and kept: a file, or a section in one."""
+        return bool(self.kept) or bool(self.preserved)
 
 
 def install_to(library, destination, project_root=None, record=True):
@@ -110,21 +127,25 @@ def install_to(library, destination, project_root=None, record=True):
     result = Result(library.name, library.version, destination)
     previous = _previous(project_root, library.name, destination) if project_root is not None else None
 
+    # Every file the library writes is checked before any is written. Markers
+    # that do not pair are the library's mistake, and finding one half way
+    # would leave the project with half of each version.
+    for entry in list(library.code_files) + list(library.present_extras()):
+        try:
+            usercode.parse((library.root / entry.source).read_bytes())
+        except usercode.MarkerError as error:
+            raise InstallError(
+                f"{entry.source.as_posix()} in {library.name} has USER CODE markers that do not "
+                f"pair, {error}. Nothing was installed."
+            ) from error
+
     destination.mkdir(parents=True, exist_ok=True)
 
-    # Code belongs to the library. Always overwrite, so an update takes effect.
+    # Code belongs to the library. Always replaced, so an update takes effect,
+    # with the user's sections carried over.
     for entry in library.code_files:
-        source = library.root / entry.source
-        target = destination / entry.destination
-
-        # A mirror layout, or an explicit "to", can put a file in a subfolder
-        # that does not exist yet.
-        target.parent.mkdir(parents=True, exist_ok=True)
-
-        if source.resolve() != target.resolve():
-            shutil.copyfile(source, target)
-
-        result.installed.append(target)
+        _write(library.root / entry.source, destination / entry.destination, previous,
+               project_root, result)
 
     # A kept file belongs to the user from the moment it first lands.
     for entry in library.once:
@@ -152,14 +173,8 @@ def install_to(library, destination, project_root=None, record=True):
     # The licence and the NOTICE ride along, because the licence says they must,
     # and anything else the manifest lists comes with them.
     for entry in library.present_extras():
-        source = library.root / entry.source
-        target = destination / entry.destination
-        target.parent.mkdir(parents=True, exist_ok=True)
-
-        if source.resolve() != target.resolve():
-            shutil.copyfile(source, target)
-
-        result.installed.append(target)
+        _write(library.root / entry.source, destination / entry.destination, previous,
+               project_root, result)
 
     if previous is not None:
         _drop_stale(previous, project_root, destination, result)
@@ -197,6 +212,100 @@ def install_in_place(library, cleanup=True, project_root=None):
     _record(root, library, result)
 
     return result
+
+
+def _write(source, target, previous, project_root, result):
+    """
+    Put one of the library's files in place, keeping the user's sections.
+
+    The copy already there is put aside first when replacing it would lose
+    something of the user's: a section the new version has no place for,
+    sections whose markers no longer pair, or a hand edit outside them.
+    """
+    # A mirror layout, or an explicit "to", can put a file in a subfolder that
+    # does not exist yet.
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    if source.resolve() == target.resolve():
+        # Installing in place: the file already is the library's own.
+        data = source.read_bytes()
+    else:
+        data = source.read_bytes()
+
+        if target.is_file():
+            old = target.read_bytes()
+            merged = usercode.merge(data, old)
+            reasons = _losses(merged, old, data, target, previous, project_root)
+
+            if reasons:
+                result.backups.append((target, backup(target), "; ".join(reasons)))
+
+            if merged.kept:
+                result.preserved.append((target, merged.kept))
+
+            data = merged.data
+
+            # Left alone when nothing changed, so the build does not see a newer
+            # file and compile it again for nothing.
+            if old != data:
+                target.write_bytes(data)
+        else:
+            target.write_bytes(data)
+
+    result.installed.append(target)
+    result.fingerprints[target] = usercode.fingerprint(data)
+
+
+def _losses(merged, old, new, target, previous, project_root):
+    """What replacing the copy already in the project would lose, in words."""
+    reasons = []
+
+    if merged.lost:
+        reasons.append("the new version has no USER CODE " + ", ".join(merged.lost))
+
+    if merged.broken:
+        # Nothing in it could be told apart from the library's own text.
+        reasons.append(f"its USER CODE markers do not pair ({merged.broken})")
+        return reasons
+
+    if previous is None or project_root is None:
+        # No record of what was written here, so no way to tell a hand edit.
+        return reasons
+
+    relative = _relative(target, project_root)
+    known = previous.get("fingerprints")
+
+    if isinstance(known, dict) and relative in known:
+        if usercode.fingerprint(old) != known[relative]:
+            reasons.append("it was changed outside its USER CODE sections")
+    elif relative in (previous.get("once") or []):
+        # The user's own file until now, from a version that listed it under
+        # once. Anything outside its sections may be theirs.
+        if usercode.fingerprint(old) != usercode.fingerprint(new):
+            reasons.append("it was yours to edit until now, and differs outside its USER CODE sections")
+
+    return reasons
+
+
+def _holds_user_work(path, previous, project_root):
+    """Whether a file about to be removed has something of the user's in it."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return False
+
+    try:
+        lines, sections = usercode.parse(data)
+    except usercode.MarkerError:
+        return True
+
+    if any(b"".join(lines[first:last]).strip() for first, last in sections.values()):
+        return True
+
+    known = previous.get("fingerprints")
+    relative = _relative(path, project_root)
+
+    return isinstance(known, dict) and relative in known and usercode.fingerprint(data) != known[relative]
 
 
 def _previous(project_root, name, destination):
@@ -264,6 +373,14 @@ def _drop_stale(previous, project_root, destination, result):
 
         if resolved in current or not _within(resolved, destination) or not old.is_file():
             continue
+
+        # Removed all the same, since a stale copy can be compiled beside the
+        # new one, but not before anything of the user's in it is put aside.
+        if _holds_user_work(old, previous, project_root):
+            try:
+                result.backups.append((old, backup(old), "no longer part of the library, and it held your changes"))
+            except OSError:
+                continue
 
         try:
             _unlink(old)
@@ -393,6 +510,9 @@ def _record(project_root, library, result):
         "folder": _relative(result.destination, project_root),
         "files": sorted(_relative(p, project_root) for p in result.installed),
         "once": sorted(_relative(p, project_root) for p in result.created + result.kept),
+        "fingerprints": {
+            _relative(p, project_root): value for p, value in sorted(result.fingerprints.items())
+        },
         "installed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
