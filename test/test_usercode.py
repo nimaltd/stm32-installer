@@ -46,13 +46,35 @@ def test_a_section_is_the_lines_between_its_markers():
     ("/* USER CODE BEGIN A */\n/* USER CODE END B */\n", "END B closes A"),
     ("/* USER CODE BEGIN A */\n/* USER CODE END A */\n/* USER CODE BEGIN A */\n/* USER CODE END A */\n",
      "A is used twice"),
-    ("/* USER CODE BEGIN A */ /* USER CODE END A */\n", "both begins and ends"),
 ])
 def test_markers_that_do_not_pair_are_named(text, says):
     with pytest.raises(usercode.MarkerError) as raised:
         usercode.parse(text.encode())
 
     assert says in str(raised.value)
+
+
+@pytest.mark.parametrize("line", [
+    "  /* USER CODE BEGIN Includes */",
+    "/*USER CODE BEGIN Includes*/",
+    "// USER CODE BEGIN Includes",
+    "# USER CODE BEGIN Includes",
+    "\t/* USER CODE BEGIN Includes */\r",
+])
+def test_a_marker_is_a_comment_alone_on_its_line(line):
+    data = (line + "\nx\n/* USER CODE END Includes */\n").encode()
+
+    assert list(usercode.parse(data)[1]) == ["Includes"]
+
+
+@pytest.mark.parametrize("line", [
+    "Keep it between `USER CODE BEGIN A` and `USER CODE END A`.",
+    "/* Put it between USER CODE BEGIN A and the END line. */",
+    "/* USER CODE BEGIN A */ int x;",
+    "int x; /* USER CODE BEGIN A */",
+])
+def test_a_mention_is_not_a_marker(line):
+    assert usercode.parse((line + "\n").encode())[1] == {}
 
 
 def test_the_users_section_goes_into_the_new_file():
@@ -293,8 +315,24 @@ def test_the_record_keeps_a_fingerprint_of_every_file_written(library, tmp_path)
 
     record = installer.installed_libraries(tmp_path / "Proj")["demo"]
 
-    assert set(record["fingerprints"]) == set(record["files"])
+    assert set(record["fingerprints"]) == {"demo/demo.h", "demo/demo_config.h", "demo/demo.c"}
     assert record["fingerprints"]["demo/demo_config.h"] == usercode.fingerprint(CONFIG_V1.encode())
+
+
+def test_a_readme_that_shows_the_markers_installs_and_is_copied_as_it_is(library, tmp_path):
+    """A README can show one example twice, or mention a marker in a sentence."""
+    example = "```c\n/* USER CODE BEGIN DEMO_CONFIGURATION */\n#define DEMO_SIZE 8\n/* USER CODE END DEMO_CONFIGURATION */\n```\n"
+    readme = "Keep it between `USER CODE BEGIN DEMO_CONFIGURATION` and its END.\n" + example + example
+    root = library(root=tmp_path / "v1" / "demo", extra_files={"README.md": readme})
+    data = (root / "library.yml").read_text(encoding="utf-8") + "extras:\n  - README.md\n"
+    (root / "library.yml").write_text(data, encoding="utf-8")
+
+    _, destination = _install(manifest.load(root), tmp_path)
+    (destination / "README.md").write_text("my notes\n", encoding="utf-8")
+    result, _ = _install(manifest.load(root), tmp_path)
+
+    assert (destination / "README.md").read_text(encoding="utf-8") == readme
+    assert result.backups == [] and result.preserved == []
 
 
 def test_once_still_means_copied_once(library, tmp_path):

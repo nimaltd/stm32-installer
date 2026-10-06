@@ -19,9 +19,10 @@ the new file so that one file never mixes the two.
 import hashlib
 import re
 
-# The name is one word, as CubeMX writes it: Includes, PV, 0, SEQ_CONFIGURATION.
-BEGIN = re.compile(rb"USER CODE BEGIN\s+([^\s*]+)")
-END = re.compile(rb"USER CODE END\s+([^\s*]+)")
+# A marker is a comment alone on its line, the way CubeMX writes it, so a
+# sentence or a README that only mentions one is not taken for one. The name
+# is one word: Includes, PV, 0, SEQ_CONFIGURATION.
+MARKER = re.compile(rb"[ \t]*(?:/\*|//|#)[ \t]*USER CODE (BEGIN|END)[ \t]+([^\s*]+)[ \t]*(?:\*/)?[ \t]*")
 
 
 class MarkerError(Exception):
@@ -50,14 +51,14 @@ def parse(data):
     first = 0
 
     for number, line in enumerate(lines, start=1):
-        begin = BEGIN.search(line)
-        end = END.search(line)
+        marker = MARKER.fullmatch(line.rstrip(b"\r\n"))
 
-        if begin and end:
-            raise MarkerError(f"line {number} both begins and ends a section")
+        if marker is None:
+            continue
 
-        if begin:
-            name = begin.group(1).decode("ascii", "replace")
+        name = marker.group(2).decode("ascii", "replace")
+
+        if marker.group(1) == b"BEGIN":
 
             if open_name is not None:
                 raise MarkerError(f"line {number}: {name} begins inside {open_name}")
@@ -67,9 +68,7 @@ def parse(data):
 
             open_name, first = name, number
 
-        elif end:
-            name = end.group(1).decode("ascii", "replace")
-
+        else:
             if open_name is None:
                 raise MarkerError(f"line {number}: END {name} has no BEGIN")
 

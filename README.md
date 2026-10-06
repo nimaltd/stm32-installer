@@ -373,7 +373,7 @@ Mark what the user is meant to change, the way STM32CubeMX marks its generated f
 
 Every install copies all the library's files again and carries each section's text from the user's copy into the section of the same name. So keep a section's name from one version to the next. A section a new version adds starts with what you ship in it, and what is inside a section is never changed by an update, defaults included. Each name is one word, used once per file. Markers that do not pair, a `BEGIN` with no `END` or one inside another, stop the install before anything is written.
 
-A library that moves a file from `once` into `files` this way must say `requires.installer: 1.7.0`. An older installer replaces the file without keeping its sections, and the user's settings would be lost.
+A library that moves a file from `once` into `files` this way must say `requires.installer: 1.7.1`. An older installer replaces the file without keeping its sections, and the user's settings would be lost. 1.7.0 keeps them, but takes a marker mentioned in a sentence for a real one, so a README or a comment that names the markers stops it.
 
 ### once
 

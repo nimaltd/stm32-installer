@@ -127,10 +127,10 @@ def install_to(library, destination, project_root=None, record=True):
     result = Result(library.name, library.version, destination)
     previous = _previous(project_root, library.name, destination) if project_root is not None else None
 
-    # Every file the library writes is checked before any is written. Markers
-    # that do not pair are the library's mistake, and finding one half way
-    # would leave the project with half of each version.
-    for entry in list(library.code_files) + list(library.present_extras()):
+    # Every code file is checked before any is written. Markers that do not
+    # pair are the library's mistake, and finding one half way would leave the
+    # project with half of each version.
+    for entry in library.code_files:
         try:
             usercode.parse((library.root / entry.source).read_bytes())
         except usercode.MarkerError as error:
@@ -171,10 +171,18 @@ def install_to(library, destination, project_root=None, record=True):
             result.created.append(target)
 
     # The licence and the NOTICE ride along, because the licence says they must,
-    # and anything else the manifest lists comes with them.
+    # and anything else the manifest lists comes with them. Copied as they are:
+    # they hold no USER CODE of the user's, and a README that shows the markers
+    # in an example must not be read as having sections.
     for entry in library.present_extras():
-        _write(library.root / entry.source, destination / entry.destination, previous,
-               project_root, result)
+        source = library.root / entry.source
+        target = destination / entry.destination
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        if source.resolve() != target.resolve():
+            shutil.copyfile(source, target)
+
+        result.installed.append(target)
 
     if previous is not None:
         _drop_stale(previous, project_root, destination, result)
