@@ -87,7 +87,7 @@ def test_a_zip_with_no_library_in_it_is_refused(project, tmp_path, no_network, c
         bundle.writestr("other-main/readme.txt", "not a library")
 
     assert cli.main([str(archive), "--project", str(root)]) == 2
-    assert "no library.yml" in capsys.readouterr().err
+    assert "no installer.yml" in capsys.readouterr().err
 
 
 def test_a_file_that_is_not_a_zip_is_refused(project, tmp_path, no_network, capsys):
@@ -140,7 +140,7 @@ def test_a_folder_inside_the_project_becomes_the_library_where_it_is(
 
     assert code == 0
     assert (folder / "demo.h").is_file()
-    assert not (folder / "library.yml").exists()
+    assert not (folder / "installer.yml").exists()
     assert not (folder / "inc").exists()
     assert "add_subdirectory(demo)" in (root / "CMakeLists.txt").read_text(encoding="utf-8")
 
@@ -170,7 +170,7 @@ def test_dir_is_refused_for_a_folder_already_in_the_project(library, project, no
     folder = library(root=root / "demo-master")
 
     assert cli.main([str(folder), "--project", str(root), "--dir", "demo"]) == 2
-    assert (folder / "library.yml").is_file(), "the folder was converted anyway"
+    assert (folder / "installer.yml").is_file(), "the folder was converted anyway"
 
 
 def test_run_from_inside_the_library_folder_its_parent_is_the_project(
@@ -192,7 +192,7 @@ def test_an_install_py_from_an_older_release_still_works(library, project, monke
 
     assert cli.main(argv=[], library_root=folder) == 0
     assert (folder / "demo.h").is_file()
-    assert not (folder / "library.yml").exists()
+    assert not (folder / "installer.yml").exists()
 
 
 # ----------------------------------------------------------------------------

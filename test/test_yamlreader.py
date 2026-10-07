@@ -107,7 +107,7 @@ def test_matches_pyyaml_on_every_manifest_in_the_repositories(tmp_path):
     from pathlib import Path
 
     repos = Path(__file__).resolve().parent.parent.parent
-    manifests = list(repos.glob("*/library.yml"))
+    manifests = list(repos.glob("*/installer.yml")) + list(repos.glob("*/library.yml"))
 
     if not manifests:
         pytest.skip("no sibling library repositories checked out")

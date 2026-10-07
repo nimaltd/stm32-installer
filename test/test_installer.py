@@ -83,7 +83,7 @@ def test_in_place_removes_the_repository_scaffolding(library, tmp_path):
     assert not (root / "inc").exists()
     assert not (root / "src").exists()
     assert not (root / "template").exists()
-    assert not (root / "library.yml").exists()
+    assert not (root / "installer.yml").exists()
     assert "test" in result.removed
 
 
@@ -178,7 +178,7 @@ def test_mirror_layout_survives_the_cleanup(library, tmp_path):
     # The repository scaffolding still has to go, or CubeIDE compiles the tests.
     assert not (root / "test").exists()
     assert not (root / "template").exists()
-    assert not (root / "library.yml").exists()
+    assert not (root / "installer.yml").exists()
 
 
 def test_mirror_layout_creates_the_subfolders_when_copying_elsewhere(library, tmp_path):
@@ -352,7 +352,7 @@ def test_an_update_in_place_puts_the_users_config_over_the_template(library, tmp
     assert (folder / "src" / "demo_config.h").read_text(encoding="utf-8") == "#define DEMO_SIZE 64\n"
     assert not (folder / "demo_config.h").exists()
     assert not (folder / "demo.c").exists()
-    assert not (folder / "library.yml").exists()
+    assert not (folder / "installer.yml").exists()
 
 
 def test_an_update_never_deletes_outside_the_library_folder(library, tmp_path):

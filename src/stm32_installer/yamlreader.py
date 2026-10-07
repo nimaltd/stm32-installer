@@ -1,5 +1,5 @@
 """
-A reader for the slice of YAML that library.yml actually uses.
+A reader for the slice of YAML that installer.yml actually uses.
 
 PyYAML is used whenever it is installed. This exists so the installer needs
 nothing but Python. pip then has nothing to fetch besides the installer itself,

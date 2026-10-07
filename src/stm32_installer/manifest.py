@@ -1,5 +1,5 @@
 """
-Reading and validating a library.yml manifest.
+Reading and validating an installer.yml manifest.
 
 Every NimaLTD library repository carries one of these at its root. It answers
 three questions: what the library is, what it needs from the project, and which
@@ -16,7 +16,13 @@ from pathlib import Path, PurePosixPath
 
 from . import yamlreader
 
-MANIFEST_NAME = "library.yml"
+MANIFEST_NAME = "installer.yml"
+
+# What the manifest was called before 1.9.0. A release tagged before the
+# rename has only this one, and --ref can still ask for it.
+LEGACY_MANIFEST_NAME = "library.yml"
+
+MANIFEST_NAMES = (MANIFEST_NAME, LEGACY_MANIFEST_NAME)
 
 # What a library is. Used for grouping and for satisfying requirements.
 KINDS = (
@@ -324,7 +330,7 @@ class Dependency:
     """
     Another library this one needs, and the oldest version of it that will do.
 
-    Written in library.yml as "osal" or "osal >= 1.1.0", with an owner in front
+    Written in installer.yml as "osal" or "osal >= 1.1.0", with an owner in front
     when it is not a NimaLTD library: "someone/osal >= 1.1.0".
     """
 
@@ -434,7 +440,7 @@ class Requirements:
 
 
 class Manifest:
-    """What a library.yml says about one library."""
+    """What an installer.yml says about one library."""
 
     def __init__(self, root, data, known=None):
         self.root = Path(root)
@@ -463,7 +469,7 @@ class Manifest:
 
         # The version lives in the code, in the @version tag of the first
         # header's file comment, so it cannot drift from what it describes. A
-        # version written in library.yml is only a fallback, for a header that
+        # version written in installer.yml is only a fallback, for a header that
         # does not carry one.
         declared = data.get("version")
         self.version = _header_version(self.root, self.headers) or (
@@ -705,12 +711,27 @@ def _escapes(destination):
     return Path(text).is_absolute() or ".." in Path(text).parts
 
 
+def manifest_path(folder):
+    """
+    The manifest in a folder: installer.yml, or library.yml in a release from
+    before the rename. None when it holds neither.
+    """
+    for name in MANIFEST_NAMES:
+        path = Path(folder) / name
+
+        if path.is_file():
+            return path
+
+    return None
+
+
 def load(library_root, strict=False, known=None):
     """
-    Read the library.yml at the root of a library repository.
+    Read the installer.yml at the root of a library repository.
 
     Args:
-        library_root: the folder holding library.yml.
+        library_root: the folder holding installer.yml, or library.yml in a release from
+            before the rename.
         strict: treat unknown kinds and categories as errors. Useful in the
             library author's own CI, too fussy for a user installing something.
         known: every path in the repository, when the files are not on disk yet.
@@ -724,9 +745,9 @@ def load(library_root, strict=False, known=None):
         absent, malformed, or promises files that are not there.
     """
     root = Path(library_root).resolve()
-    path = root / MANIFEST_NAME
+    path = manifest_path(root)
 
-    if not path.is_file():
+    if path is None:
         raise ManifestError(f"No {MANIFEST_NAME} in {root}. Is this a NimaLTD library?")
 
     try:

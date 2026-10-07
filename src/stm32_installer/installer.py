@@ -52,6 +52,7 @@ DEFAULT_CLEANUP = [
     "template",
     "CMakeLists.txt",
     "CONTRIBUTING.md",
+    "installer.yml",
     "library.yml",
     "install.py",
 ]
@@ -77,6 +78,10 @@ class Result:
         # last install that the new version no longer ships.
         self.moved = []
         self.dropped = []
+        # An update only: (from, to, [section names]) for each library file the
+        # new version puts in another folder, and the USER CODE sections that
+        # went with it, none for a file that had none.
+        self.carried = []
         # An update only: defines the last install of this library put in the
         # project and this version no longer asks for, so the IDE files can let
         # go of them. Only ever ones this library added.
@@ -148,9 +153,12 @@ def install_to(library, destination, project_root=None, record=True):
 
     # Code belongs to the library. Always replaced, so an update takes effect,
     # with the user's sections carried over.
+    targets = {(destination / entry.destination).resolve() for entry in library.code_files}
+
     for entry in library.code_files:
-        _write(library.root / entry.source, destination / entry.destination, previous,
-               project_root, result)
+        target = destination / entry.destination
+        earlier = _moved_code(previous, project_root, target, targets)
+        _write(library.root / entry.source, target, previous, project_root, result, earlier)
 
     # A kept file belongs to the user from the moment it first lands.
     for entry in library.once:
@@ -229,13 +237,17 @@ def install_in_place(library, cleanup=True, project_root=None):
     return result
 
 
-def _write(source, target, previous, project_root, result):
+def _write(source, target, previous, project_root, result, earlier=None):
     """
     Put one of the library's files in place, keeping the user's sections.
 
     The copy already there is put aside first when replacing it would lose
     something of the user's: a section the new version has no place for,
     sections whose markers no longer pair, or a hand edit outside them.
+
+    earlier is where the last install put this file, when the new version puts
+    it in another folder. Its sections are carried into the new place, the
+    same as from a copy already there.
     """
     # A mirror layout, or an explicit "to", can put a file in a subfolder that
     # does not exist yet.
@@ -247,28 +259,62 @@ def _write(source, target, previous, project_root, result):
     else:
         data = source.read_bytes()
 
-        if target.is_file():
-            old = target.read_bytes()
+        current = target if target.is_file() else earlier
+
+        if current is not None:
+            old = current.read_bytes()
             merged = usercode.merge(data, old)
-            reasons = _losses(merged, old, data, target, previous, project_root)
+            reasons = _losses(merged, old, data, current, previous, project_root)
 
             if reasons:
-                result.backups.append((target, backup(target), "; ".join(reasons)))
+                result.backups.append((current, backup(current), "; ".join(reasons)))
 
             if merged.kept:
                 result.preserved.append((target, merged.kept))
+
+            if current != target:
+                result.carried.append((current, target, merged.kept))
 
             data = merged.data
 
             # Left alone when nothing changed, so the build does not see a newer
             # file and compile it again for nothing.
-            if old != data:
+            if (current != target) or (old != data):
                 target.write_bytes(data)
         else:
             target.write_bytes(data)
 
     result.installed.append(target)
     result.fingerprints[target] = usercode.fingerprint(data)
+
+
+def _moved_code(previous, project_root, target, targets):
+    """
+    Where the last install put a library file that this version puts elsewhere.
+
+    Found by its name among the library's own files from the last install,
+    littlefs/lfs_defines.h for littlefs/src/lfs_defines.h. Only when exactly one
+    matches, it is still there, and this version installs nothing in its place.
+    Anything else is not a move, and the file starts from what the library
+    ships, as before.
+    """
+    if previous is None or project_root is None or target.exists():
+        return None
+
+    found = []
+
+    for relative in previous.get("files") or []:
+        old = Path(project_root) / relative
+
+        try:
+            resolved = old.resolve()
+        except OSError:
+            continue
+
+        if old.name == target.name and resolved not in targets and old.is_file():
+            found.append(old)
+
+    return found[0] if len(found) == 1 else None
 
 
 def _losses(merged, old, new, target, previous, project_root):
@@ -377,6 +423,7 @@ def _drop_stale(previous, project_root, destination, result):
     was never recorded at all, so neither can end up here.
     """
     current = {p.resolve() for p in result.installed + result.created + result.kept}
+    carried = {old.resolve() for old, _, _ in result.carried}
 
     for relative in previous.get("files") or []:
         old = Path(project_root) / relative
@@ -391,7 +438,9 @@ def _drop_stale(previous, project_root, destination, result):
 
         # Removed all the same, since a stale copy can be compiled beside the
         # new one, but not before anything of the user's in it is put aside.
-        if _holds_user_work(old, previous, project_root):
+        # A file whose sections went to its new place holds nothing more of the
+        # user's. Anything it held outside them was put aside as it went.
+        if resolved not in carried and _holds_user_work(old, previous, project_root):
             try:
                 result.backups.append((old, backup(old), "no longer part of the library, and it held your changes"))
             except OSError:

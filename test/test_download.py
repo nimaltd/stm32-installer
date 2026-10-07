@@ -51,7 +51,7 @@ def github(monkeypatch):
     collects (url, headers) for every request.
     """
     state = types.SimpleNamespace(
-        files={"library.yml": MANIFEST, "demo.h": b"/* h */\n", "demo.c": b"/* c */\n"},
+        files={"installer.yml": MANIFEST, "demo.h": b"/* h */\n", "demo.c": b"/* c */\n"},
         seen=[],
         status=None,
         branches=None,
@@ -122,7 +122,7 @@ def test_github_token_comes_before_gh_token(github, monkeypatch, tmp_path):
 
 def test_a_private_repository_without_a_token_says_what_to_do(github, tmp_path):
     """GitHub answers 404 for a private repository, so 'does not exist' alone would mislead."""
-    del github.files["library.yml"]
+    del github.files["installer.yml"]
 
     with pytest.raises(download.DownloadError) as raised:
         download.fetch("someone/private", destination=tmp_path / "lib")
@@ -191,7 +191,7 @@ def test_a_branch_with_a_slash_stays_one_ref(github, monkeypatch, tmp_path):
     download.fetch("someone/private", ref="feature/x", destination=tmp_path / "lib")
     url, _ = github.seen[0]
 
-    assert url.endswith("/contents/library.yml?ref=feature%2Fx")
+    assert url.endswith("/contents/installer.yml?ref=feature%2Fx")
 
 
 # ----------------------------------------------------------------------------
@@ -212,8 +212,11 @@ def test_no_ref_falls_back_to_master_for_every_file(github, tmp_path):
 
     download.fetch("someone/demo", destination=tmp_path / "lib")
 
-    assert _ref_of(github.seen[0][0]) == "main"
-    assert {_ref_of(url) for url, _ in github.seen[1:]} == {"master"}
+    refs = [_ref_of(url) for url, _ in github.seen]
+
+    # main is asked for installer.yml, then for library.yml, its old name.
+    assert refs[:2] == ["main", "main"]
+    assert set(refs[2:]) == {"master"}
     assert (tmp_path / "lib" / "demo.c").read_bytes() == b"/* c */\n"
 
 

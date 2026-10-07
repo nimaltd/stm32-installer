@@ -24,7 +24,7 @@ classifiers = [
 ]
 
 # None. PyYAML is used when it happens to be installed, and a reader built
-# into the package handles library.yml otherwise. Requiring it would make
+# into the package handles installer.yml otherwise. Requiring it would make
 # pip go online for it, which is exactly what an offline install cannot do.
 dependencies = []
 

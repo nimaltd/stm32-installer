@@ -1,4 +1,4 @@
-"""Tests for reading and validating library.yml."""
+"""Tests for reading and validating installer.yml."""
 
 from pathlib import Path
 
@@ -60,7 +60,7 @@ def test_an_rtos_library_provides_rtos_without_saying_so(library):
 
 
 def test_missing_manifest_is_reported_clearly(tmp_path):
-    with pytest.raises(manifest.ManifestError, match="No library.yml"):
+    with pytest.raises(manifest.ManifestError, match="No installer.yml"):
         manifest.load(tmp_path)
 
 
@@ -81,7 +81,7 @@ def test_a_manifest_with_no_code_is_refused(library):
 
 def test_broken_yaml_is_reported_as_yaml(library):
     root = library()
-    (root / "library.yml").write_text("name: demo\n  bad indent: [", encoding="utf-8")
+    (root / "installer.yml").write_text("name: demo\n  bad indent: [", encoding="utf-8")
 
     with pytest.raises(manifest.ManifestError, match="not valid YAML"):
         manifest.load(root)
@@ -196,9 +196,9 @@ def test_a_folder_expands_and_keeps_its_shape(library):
 
     import yaml
 
-    data = yaml.safe_load((root / "library.yml").read_text(encoding="utf-8"))
+    data = yaml.safe_load((root / "installer.yml").read_text(encoding="utf-8"))
     data["extras"] = ["docs"]
-    (root / "library.yml").write_text(yaml.safe_dump(data), encoding="utf-8")
+    (root / "installer.yml").write_text(yaml.safe_dump(data), encoding="utf-8")
 
     found = manifest.load(root)
 
@@ -214,9 +214,9 @@ def test_an_extras_pattern_matching_nothing_only_warns(library):
     import yaml
 
     root = library()
-    data = yaml.safe_load((root / "library.yml").read_text(encoding="utf-8"))
+    data = yaml.safe_load((root / "installer.yml").read_text(encoding="utf-8"))
     data["extras"] = ["docs/*.md"]
-    (root / "library.yml").write_text(yaml.safe_dump(data), encoding="utf-8")
+    (root / "installer.yml").write_text(yaml.safe_dump(data), encoding="utf-8")
 
     found = manifest.load(root)
 

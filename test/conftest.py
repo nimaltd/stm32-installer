@@ -71,7 +71,7 @@ def library(tmp_path):
 
         data = {"name": name}
 
-        # None leaves the key out entirely, the way a library.yml looks now that
+        # None leaves the key out entirely, the way a installer.yml looks now that
         # the version is read from the header instead.
         if version is not None:
             data["version"] = version
@@ -91,7 +91,7 @@ def library(tmp_path):
         if options:
             data["options"] = options
 
-        (root / "library.yml").write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+        (root / "installer.yml").write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
         return root
 

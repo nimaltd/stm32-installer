@@ -134,7 +134,7 @@ def _library_cmakelists(library):
 # target of a given name.
 #
 # This file is written again on every install and update, so a change made
-# here does not last. The files come from the library's library.yml.
+# here does not last. The files come from the library's installer.yml.
 
 add_library({target} INTERFACE)
 

@@ -324,8 +324,8 @@ def test_a_readme_that_shows_the_markers_installs_and_is_copied_as_it_is(library
     example = "```c\n/* USER CODE BEGIN DEMO_CONFIGURATION */\n#define DEMO_SIZE 8\n/* USER CODE END DEMO_CONFIGURATION */\n```\n"
     readme = "Keep it between `USER CODE BEGIN DEMO_CONFIGURATION` and its END.\n" + example + example
     root = library(root=tmp_path / "v1" / "demo", extra_files={"README.md": readme})
-    data = (root / "library.yml").read_text(encoding="utf-8") + "extras:\n  - README.md\n"
-    (root / "library.yml").write_text(data, encoding="utf-8")
+    data = (root / "installer.yml").read_text(encoding="utf-8") + "extras:\n  - README.md\n"
+    (root / "installer.yml").write_text(data, encoding="utf-8")
 
     _, destination = _install(manifest.load(root), tmp_path)
     (destination / "README.md").write_text("my notes\n", encoding="utf-8")

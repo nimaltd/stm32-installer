@@ -138,7 +138,7 @@ def _fetch(owner, repo, ref, path):
             # GitHub answers a private repository it will not show you with 404,
             # the same as one that does not exist. Only the manifest is asked for
             # first, so that is where a missing token shows up.
-            hint = _private_hint(variable, token) if path == "library.yml" else ""
+            hint = _private_hint(variable, token) if path in manifest.MANIFEST_NAMES else ""
 
             raise NotFoundError(f"{path} does not exist in {owner}/{repo} at {ref}.{hint}") from error
 
@@ -191,25 +191,28 @@ def _private_hint(variable, token):
 
 def _manifest(owner, repo, ref):
     """
-    The bytes of library.yml, and the ref they came from.
+    The bytes of the manifest, the ref they came from, and its name.
 
     With no ref, main is tried first and then master, so a repository on either
-    branch installs without --ref. Only a 404 moves on to the next branch. Any
-    other failure, a refused token or no network, would fail the same way on
-    master, and would then be reported as the wrong problem.
+    branch installs without --ref. On each, installer.yml is asked for first,
+    then library.yml, its name before 1.9.0, which a release tagged before the
+    rename still has. Only a 404 moves on. Any other failure, a refused token or
+    no network, would fail the same way on the next try, and would then be
+    reported as the wrong problem.
     """
-    if ref is not None:
-        return _fetch(owner, repo, ref, "library.yml"), ref
+    refs = [ref] if ref is not None else list(DEFAULT_BRANCHES)
 
-    for branch in DEFAULT_BRANCHES:
-        try:
-            return _fetch(owner, repo, branch, "library.yml"), branch
-        except NotFoundError:
-            continue
+    for branch in refs:
+        for name in manifest.MANIFEST_NAMES:
+            try:
+                return _fetch(owner, repo, branch, name), branch, name
+            except NotFoundError:
+                continue
+
+    where = f"at {ref}" if ref is not None else f"on {' or '.join(DEFAULT_BRANCHES)}"
 
     raise NotFoundError(
-        f"library.yml does not exist in {owner}/{repo} on "
-        f"{' or '.join(DEFAULT_BRANCHES)}.{_private_hint(*_token())}"
+        f"{manifest.MANIFEST_NAME} does not exist in {owner}/{repo} {where}.{_private_hint(*_token())}"
     )
 
 
@@ -275,16 +278,16 @@ def fetch(source, ref=None, destination=None):
 def _fill(owner, repo, ref, root):
     """Download the manifest, then every file it lists, into root."""
     # Every file then comes from the branch the manifest was found on.
-    raw, ref = _manifest(owner, repo, ref)
-    (root / "library.yml").write_bytes(raw)
+    raw, ref, name = _manifest(owner, repo, ref)
+    (root / name).write_bytes(raw)
 
     try:
         data = yamlreader.parse(raw.decode("utf-8"))
     except (yamlreader.YamlError, UnicodeDecodeError) as error:
-        raise DownloadError(f"{owner}/{repo} has a library.yml that cannot be read: {error}")
+        raise DownloadError(f"{owner}/{repo} has a {name} that cannot be read: {error}")
 
     if not isinstance(data, dict):
-        raise DownloadError(f"{owner}/{repo} has a library.yml that is not a mapping.")
+        raise DownloadError(f"{owner}/{repo} has a {name} that is not a mapping.")
 
     # Before a single listed file is fetched. A manifest for a newer installer
     # may list its files in a way this one would get wrong.
@@ -359,7 +362,7 @@ def _split(source):
 
 def find_root(folder):
     """
-    The folder holding library.yml: the one given, or the only one inside it.
+    The folder holding installer.yml: the one given, or the only one inside it.
 
     GitHub's zip holds a single top folder, example-main, and Windows' Extract
     All puts that inside another folder of the same name. Either is what a user
@@ -368,14 +371,14 @@ def find_root(folder):
     """
     folder = Path(folder)
 
-    if (folder / "library.yml").is_file():
+    if manifest.manifest_path(folder) is not None:
         return folder
 
     try:
         found = [
             child
             for child in sorted(folder.iterdir())
-            if child.is_dir() and (child / "library.yml").is_file()
+            if child.is_dir() and manifest.manifest_path(child) is not None
         ]
     except OSError:
         return None
@@ -407,7 +410,7 @@ def unpack(archive):
     if root is None:
         cleanup(staging)
         raise DownloadError(
-            f"{Path(archive).name} holds no library.yml, so there is no library in it to install."
+            f"{Path(archive).name} holds no installer.yml, so there is no library in it to install."
         )
 
     return staging, root

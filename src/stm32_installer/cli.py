@@ -196,12 +196,30 @@ def _print_files(result, root, library=None):
         print(console.item("moved", "yours, kept as it was",
                            f"{_show(old, root)} -> {_show(new, root)}", console.CYAN))
 
+    # A file that took the user's sections to its new place says so. One with
+    # none to take is only an old copy gone, and is reported as removed.
+    carried = {Path(old).resolve() for old, _, kept in result.carried if kept}
+
+    for old, new, kept in result.carried:
+        if kept:
+            print(console.item("moved", "your USER CODE " + ", ".join(kept) + " went with it",
+                               f"{_show(old, root)} -> {_show(new, root)}", console.CYAN))
+
     for path in result.dropped:
+        if Path(path).resolve() in carried:
+            continue
+
         option = unchosen.get(Path(path).resolve())
         why = f"option {option} is off" if option else "no longer part of the library"
         print(console.item("removed", why, _show(path, root), console.YELLOW))
 
+    moved_with = {Path(new).resolve() for _, new, kept in result.carried if kept}
+
     for path, names in result.preserved:
+        # Already said on its "moved" line.
+        if Path(path).resolve() in moved_with:
+            continue
+
         print(console.item("kept", "your USER CODE " + ", ".join(names), _show(path, root),
                            console.CYAN))
 
@@ -467,7 +485,7 @@ def _stage(target, ref, project_root, local=False):
 
 def _load(source, project_root):
     """
-    Read a source's library.yml.
+    Read a source's installer.yml.
 
     Returns None when it was read, otherwise the exit code to stop with, the
     reason already printed.
@@ -475,7 +493,7 @@ def _load(source, project_root):
     try:
         source.library = manifest.load(source.root)
     except manifest.ManifestError as error:
-        # Installing in place removes library.yml, so the most likely reason it
+        # Installing in place removes installer.yml, so the most likely reason it
         # is missing there is that this folder has already been installed once.
         if source.in_place:
             root = source.project_root or project_root

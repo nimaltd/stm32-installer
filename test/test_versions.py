@@ -1,7 +1,7 @@
 """
-Two versions a library.yml deals with, and where each one lives.
+Two versions a installer.yml deals with, and where each one lives.
 
-The library's own version is not written in library.yml any more. It is read
+The library's own version is not written in installer.yml any more. It is read
 from the @version tag in the file comment of the library's first header, so it
 lives in one place, the code, and cannot drift from what it describes.
 
@@ -109,8 +109,8 @@ def test_a_two_part_installer_version_is_refused(library):
 def test_the_check_comes_before_anything_else_is_read(library):
     """A manifest for a newer installer may not have the fields this one expects."""
     root = library(requires={"installer": _newer()})
-    text = (root / "library.yml").read_text(encoding="utf-8").replace("files:", "sources_v9:")
-    (root / "library.yml").write_text(text, encoding="utf-8")
+    text = (root / "installer.yml").read_text(encoding="utf-8").replace("files:", "sources_v9:")
+    (root / "installer.yml").write_text(text, encoding="utf-8")
 
     with pytest.raises(manifest.ManifestError) as raised:
         manifest.load(root)
@@ -125,7 +125,7 @@ def test_online_it_stops_before_downloading_a_single_listed_file(monkeypatch, tm
     def fake_fetch(owner, repo, ref, path):
         requested.append(path)
 
-        if path == "library.yml":
+        if path == "installer.yml":
             return (
                 "name: demo\n"
                 f"requires:\n  installer: {_newer()}\n"
@@ -141,7 +141,7 @@ def test_online_it_stops_before_downloading_a_single_listed_file(monkeypatch, tm
         download.fetch("nimaltd/demo")
 
     assert "needs stm32-installer" in str(raised.value)
-    assert requested == ["library.yml"]
+    assert requested == ["installer.yml"]
     assert not staging.exists(), "the temporary folder was left behind"
 
 

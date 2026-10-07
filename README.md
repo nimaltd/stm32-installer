@@ -128,7 +128,7 @@ stm32-installer nimaltd/example --ref 00949e695e16   # an exact commit
 
 ### Where the files go
 
-**From GitHub, from a zip, or from a folder outside your project**, the files the library's `library.yml` lists are copied into a folder of your project. Nothing else comes with them, so the library's tests never reach your build. The zip or folder you gave is left exactly as it was.
+**From GitHub, from a zip, or from a folder outside your project**, the files the library's `installer.yml` lists are copied into a folder of your project. Nothing else comes with them, so the library's tests never reach your build. The zip or folder you gave is left exactly as it was.
 
 **A folder already inside your project** becomes the library where it stands. The header and source move to its top, your config file is created, and everything that belongs to the repository rather than your firmware is removed from it, the test folder above all. `--dir` does not apply here, since the folder is already where it is going. Rename it first if you want it called something else.
 
@@ -190,13 +190,14 @@ Put your settings, and anything else you add to a library file, inside those sec
 
 That happens when you edited the library outside a section, when its markers no longer pair, or when the new version no longer has a section you had written in. Take what you need from the `.bak` file, then delete it. A file nobody touched is left as it is, so your build does not compile it again for nothing.
 
-When a new version keeps its files somewhere else, say in `src/`, the update moves your project along with it. Your `example_config.h` goes where the new version looks for it, with your settings still in it, rather than a fresh default turning up next to the header. Files the old version installed and the new one no longer has are removed, so an old `example.c` cannot end up compiled beside the new one. Keil, IAR and the Makefile are pointed at the new places, and a file the library gained joins its group there. Anything you put in the library's folder yourself is left alone.
+When a new version keeps its files somewhere else, say in `src/`, the update moves your project along with it. Your `example_config.h` goes where the new version looks for it, with your settings between its `USER CODE` lines still in it, rather than a fresh default turning up next to the header. Files the old version installed and the new one no longer has are removed, so an old `example.c` cannot end up compiled beside the new one. Keil, IAR and the Makefile are pointed at the new places, and a file the library gained joins its group there. Anything you put in the library's folder yourself is left alone.
 
 ```
 Files
   written example/src/example.h
+  written example/src/example_config.h
   written example/src/example.c
-  moved   example/example_config.h -> example/src/example_config.h  yours, kept as it was
+  moved   example/example_config.h -> example/src/example_config.h  your USER CODE EXAMPLE_CONFIGURATION went with it
   removed example/example.h  no longer part of the library
   removed example/example.c  no longer part of the library
 ```
@@ -308,7 +309,7 @@ It cannot switch a peripheral on for you. The `.ioc` belongs to CubeMX, and edit
 
 ## For someone writing a library
 
-Put a `library.yml` at the root of the repository.
+Put an `installer.yml` at the root of the repository. Releases before 1.9.0 called it `library.yml`, and the installer still reads that name when there is no `installer.yml`, so a version pinned with `--ref` from before the rename installs as it always did. A library that renames its file says `requires.installer: 1.9.0`.
 
 ```yaml
 name: example
