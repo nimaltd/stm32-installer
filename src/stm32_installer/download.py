@@ -13,10 +13,12 @@ GH_TOKEN. With one, every file comes from the API rather than from
 raw.githubusercontent, which cannot see a private repository at all.
 """
 
+import http.client
 import json
 import os
 import shutil
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -35,6 +37,15 @@ DEFAULT_OWNER = "nimaltd"
 DEFAULT_BRANCHES = ("main", "master")
 TIMEOUT_SECONDS = 30
 
+# Tries in all for one file, when the connection drops, resets, times out or
+# is cut off part way, or GitHub answers 5xx. 1, 2, 4 and 8 seconds between
+# them, so a link that is down for a few seconds, or throttled, gets through.
+# Without a token they take turns between raw.githubusercontent.com and
+# api.github.com, two hosts on different addresses, so one that is filtered
+# or failing does not decide alone. Tested from a user's machine where GitHub
+# kept closing the connection part way through an install.
+ATTEMPTS = 5
+
 # Where a token is looked for, in this order. GitHub Actions sets the first and
 # the gh command reads the second, so a machine set up for either works as it
 # is. Never an option on the command line, where it would stay in the shell's
@@ -44,6 +55,15 @@ TOKEN_VARIABLES = ("GITHUB_TOKEN", "GH_TOKEN")
 # The file as it is, not wrapped in JSON and base64 the way the API hands a file
 # out by default.
 RAW_MEDIA = "application/vnd.github.raw"
+
+
+# What to do when GitHub cannot be reached, said once wherever that happens.
+OFFLINE_HINT = (
+    "Run it again, as a bad connection often passes. Behind a proxy or a VPN, set HTTPS_PROXY to it, "
+    "or use the system proxy on Windows. Or download each library with Code, Download ZIP, from "
+    "wherever GitHub opens, and give the zips on the command line: "
+    "stm32-installer spif-main.zip osal-main.zip"
+)
 
 
 class DownloadError(Exception):
@@ -107,18 +127,49 @@ def _open(url, token=None, accept=None):
 def _fetch(owner, repo, ref, path):
     """Fetch one file's bytes. Raises DownloadError with a readable message."""
     variable, token = _token()
+    api = CONTENTS_URL.format(
+        owner=owner, repo=repo, path=urllib.parse.quote(path), ref=urllib.parse.quote(ref, safe="")
+    )
 
-    if token:
-        url = CONTENTS_URL.format(
-            owner=owner, repo=repo, path=urllib.parse.quote(path), ref=urllib.parse.quote(ref, safe="")
-        )
-    else:
-        url = RAW_URL.format(owner=owner, repo=repo, ref=ref, path=path)
+    # A private repository is only reachable through the API, with the token.
+    urls = [api] if token else [RAW_URL.format(owner=owner, repo=repo, ref=ref, path=path), api]
 
-    try:
-        with _open(url, token, RAW_MEDIA if token else None) as response:
-            return response.read()
-    except urllib.error.HTTPError as error:
+    for attempt in range(1, ATTEMPTS + 1):
+        url = urls[(attempt - 1) % len(urls)]
+
+        try:
+            return _get(url, token, RAW_MEDIA if url == api else None)
+        except (urllib.error.URLError, OSError, http.client.HTTPException) as error:
+            if not _passing(error, token) or attempt == ATTEMPTS:
+                _report(error, owner, repo, ref, path, variable, token)
+
+            time.sleep(2 ** (attempt - 1))
+
+
+def _passing(error, token):
+    """
+    Whether trying again could get a different answer.
+
+    A dropped connection, a timeout or a 5xx could. A 404 is GitHub's answer
+    and the same every time, which the manifest's own fallback relies on, and
+    so is a 401 or a 403 to a token. Without a token, a 403 or a 429 is the API's
+    limit on requests, and the other host may still answer.
+    """
+    if not isinstance(error, urllib.error.HTTPError):
+        return True
+
+    return error.code >= 500 or (not token and error.code in (403, 429))
+
+
+def _get(url, token, accept):
+    """One request for one file, its bytes read to the end."""
+    with _open(url, token, accept) as response:
+        return response.read()
+
+
+def _report(error, owner, repo, ref, path, variable, token):
+    """Raise the DownloadError that says, in words, what went wrong with one file."""
+    if isinstance(error, urllib.error.HTTPError):
         if error.code == 401 and token:
             raise DownloadError(
                 f"GitHub did not accept the token in {variable}. It may have expired, or been revoked."
@@ -143,8 +194,16 @@ def _fetch(owner, repo, ref, path):
             raise NotFoundError(f"{path} does not exist in {owner}/{repo} at {ref}.{hint}") from error
 
         raise DownloadError(f"Could not download {path} from {owner}/{repo}: HTTP {error.code}.") from error
-    except urllib.error.URLError as error:
-        raise DownloadError(f"Could not reach GitHub: {error.reason}.") from error
+
+    # Not reached, or the connection dropped, reset, timed out or was cut short.
+    # urllib leaves the last ones as they are, not wrapped in a URLError, so
+    # before they were caught here they ended the run with a traceback.
+    reason = error.reason if isinstance(error, urllib.error.URLError) else (error or type(error).__name__)
+
+    raise DownloadError(
+        f"Could not fetch {path} from {owner}/{repo}, after {ATTEMPTS} tries: {reason}.\n"
+        f"{OFFLINE_HINT}"
+    ) from error
 
 
 def _listed_entries(data):
@@ -230,7 +289,7 @@ def tree(owner, repo, ref):
     try:
         with _open(url, _token()[1], "application/vnd.github+json") as response:
             data = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, OSError, ValueError):
+    except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError):
         return None
 
     if data.get("truncated"):

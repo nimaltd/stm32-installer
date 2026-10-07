@@ -36,6 +36,26 @@ Update it with:
     pip install --upgrade stm32-installer
 ```
 
+### On a bad connection
+
+A file that does not arrive is tried again, five times in all, 1, 2, 4 and 8 seconds apart. The tries take turns between `raw.githubusercontent.com` and `api.github.com`, two hosts on different addresses, so one that is filtered or failing does not stop the install. Every file of every library is fetched before anything is installed, so a run that fails part way leaves your project as it was: run it again.
+
+Behind a proxy, or a VPN client that offers one, point the installer at it. In Command Prompt:
+
+```bash
+set HTTPS_PROXY=http://127.0.0.1:10809
+```
+
+In PowerShell:
+
+```bash
+$env:HTTPS_PROXY = "http://127.0.0.1:10809"
+```
+
+On Linux and macOS, `export HTTPS_PROXY=http://127.0.0.1:10809`. Use your proxy's own address and port. On Windows, a proxy set in the system settings is used without this.
+
+pip has its own retries, and on a slow link it helps to give it more time: `pip install --retries 10 --timeout 60 stm32-installer`. When nothing gets through, install from zips, as below.
+
 ### Without internet
 
 On a machine that has internet, save the installer as a file:
