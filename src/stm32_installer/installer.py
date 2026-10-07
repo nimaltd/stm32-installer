@@ -24,6 +24,7 @@ from pathlib import Path
 
 from . import usercode
 from .ide.base import backup
+from .manifest import DEFINE
 
 RECORD_NAME = ".stm32-installer.json"
 
@@ -76,6 +77,10 @@ class Result:
         # last install that the new version no longer ships.
         self.moved = []
         self.dropped = []
+        # An update only: defines the last install of this library put in the
+        # project and this version no longer asks for, so the IDE files can let
+        # go of them. Only ever ones this library added.
+        self.dropped_defines = []
         # (file, [section names]) for each file whose USER CODE sections were
         # carried into the new version.
         self.preserved = []
@@ -186,6 +191,7 @@ def install_to(library, destination, project_root=None, record=True):
 
     if previous is not None:
         _drop_stale(previous, project_root, destination, result)
+        result.dropped_defines = _dropped_defines(previous, library)
 
     if project_root is not None and record:
         _record(project_root, library, result)
@@ -216,6 +222,7 @@ def install_in_place(library, cleanup=True, project_root=None):
 
     if cleanup:
         _remove_scaffolding(library, result)
+        _remove_unchosen(library, result)
 
     _record(root, library, result)
 
@@ -401,6 +408,25 @@ def _drop_stale(previous, project_root, destination, result):
         _prune(old.parent, destination)
 
 
+def _dropped_defines(previous, library):
+    """
+    The defines the last install of this library asked for and this one does not.
+
+    Read from the record, which is a file in the user's project anyone can
+    edit, so an entry is checked as strictly as one from a manifest before it
+    is used to find text to take out of a project file.
+    """
+    recorded = previous.get("defines")
+
+    if not isinstance(recorded, list):
+        return []
+
+    return [
+        define for define in recorded
+        if isinstance(define, str) and DEFINE.match(define) and define not in library.defines
+    ]
+
+
 def _within(path, root):
     """Whether path is inside root, not root itself. 3.8 has no is_relative_to."""
     try:
@@ -465,6 +491,34 @@ def _remove_scaffolding(library, result):
         result.removed.append(name)
 
 
+def _remove_unchosen(library, result):
+    """
+    Delete the files of the options not taken, from a library installed in place.
+
+    They came with the repository, and left there, STM32CubeIDE would compile
+    them with everything else under the project: spif's littlefs port without
+    littlefs, and a build that fails on a header nobody asked for.
+    """
+    for name, option in library.options.items():
+        if name in library.chosen:
+            continue
+
+        for entry in option.code_files:
+            target = library.root / entry.source
+
+            if not target.is_file():
+                continue
+
+            try:
+                _unlink(target)
+            except OSError as error:
+                result.removed.append(f"{entry.source.as_posix()} (could not remove: {error.strerror or error})")
+                continue
+
+            result.removed.append(entry.source.as_posix())
+            _prune(target.parent, library.root)
+
+
 def _force_writable(func, path, _error):
     """
     Retry a failed delete after clearing the read-only bit.
@@ -521,6 +575,10 @@ def _record(project_root, library, result):
         "fingerprints": {
             _relative(p, project_root): value for p, value in sorted(result.fingerprints.items())
         },
+        "defines": list(library.defines),
+        # Every option offered, and whether it was taken. One the record does
+        # not name is new to this project, and is asked about.
+        "options": {name: name in library.chosen for name in library.options},
         "installed_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 

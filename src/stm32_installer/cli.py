@@ -51,12 +51,9 @@ def _header(library):
     return "\n".join(lines)
 
 
-def _ask_folder(default, name=None):
+def _answer(prompt):
     """
-    Ask where a library should go, or take the default when nobody can answer.
-
-    name is said in the question once more than one library may be installed in
-    one run, so it is clear which one the folder is for.
+    Ask a question and return what was typed, or None when nobody can answer.
 
     Piped into Python, the installer arrives on stdin, so stdin cannot also carry
     the answer. The console is read directly instead: /dev/tty on Linux and
@@ -64,23 +61,86 @@ def _ask_folder(default, name=None):
     screen. Otherwise nobody is there to read the question, and waiting for an
     answer would hang a script or a build server for ever.
     """
-    what = f"{name} " if name else ""
-    prompt = console.strong(f"Folder to install {what}into [{default}]: ")
-
     try:
         if sys.stdin is not None and sys.stdin.isatty():
-            return input(prompt).strip() or default
+            return input(prompt).strip()
 
         if sys.stdout is None or not sys.stdout.isatty():
-            return default
+            return None
 
         device = "CONIN$" if os.name == "nt" else "/dev/tty"
 
         with open(device, "r") as terminal:
             print(prompt, end="", flush=True)
-            return terminal.readline().strip() or default
+            return terminal.readline().strip()
     except (OSError, EOFError):
-        return default
+        return None
+
+
+def _ask_folder(default, name=None):
+    """
+    Ask where a library should go, or take the default when nobody can answer.
+
+    name is said in the question once more than one library may be installed in
+    one run, so it is clear which one the folder is for.
+    """
+    what = f"{name} " if name else ""
+
+    return _answer(console.strong(f"Folder to install {what}into [{default}]: ")) or default
+
+
+def _choose_options(library, project_root, turn_on=(), turn_off=(), ask=False):
+    """
+    Settle which of a library's options this install takes, and say so.
+
+    An option named with --with or --without is that. One the project has an
+    answer for, from the last install, keeps it without a question: an update
+    is not the moment to ask again, and the line printed says how to change it.
+    Anything else is asked when it may be, and is no otherwise, since nobody
+    chose it.
+    """
+    if not library.options:
+        return
+
+    recorded = installer.installed_libraries(project_root).get(library.name)
+    before = recorded.get("options") if isinstance(recorded, dict) else None
+    before = before if isinstance(before, dict) else {}
+    chosen = []
+
+    print()
+    print(console.heading("Options"))
+
+    for name, option in library.options.items():
+        label = f"  {name:<10} "
+        brings = ", ".join(d.name for d in option.libraries)
+
+        if name in turn_on:
+            taken, said = True, f"yes, as asked with --with {name}"
+        elif name in turn_off:
+            taken, said = False, f"no, as asked with --without {name}"
+
+            if before.get(name) is True and brings:
+                said += f". Its files go. {brings} stays in the project, for anything else using it"
+        elif name in before:
+            taken = before[name] is True
+            said = (f"yes, as before. Change it with --without {name}" if taken
+                    else f"no, as before. Add it with --with {name}")
+        elif ask:
+            reply = _answer(label + console.strong(f"{option.description or name}. Add it? [y/N]: "))
+            taken = reply is not None and reply.lower() in ("y", "yes")
+            said = None if reply is not None else f"no, nobody was asked. Add it with --with {name}"
+        else:
+            # A library that came in because another needs it. The flags are
+            # for the libraries named on the command line, so this says how.
+            taken, said = False, f"no. Add it with: stm32-installer {library.name} --with {name}"
+
+        if taken:
+            chosen.append(name)
+
+        if said:
+            print(label + said)
+
+    library.choose(chosen)
 
 
 def _print_requirements(findings):
@@ -105,8 +165,18 @@ def _print_requirements(findings):
             print(f"          {console.note(finding.hint)}")
 
 
-def _print_files(result, root):
+def _print_files(result, root, library=None):
     """Every file written, created, or deliberately left alone."""
+    # The files of an option not taken, by where they would land, so a file
+    # that went because the option was turned off says that rather than that
+    # the library dropped it.
+    unchosen = {}
+
+    for name, option in (library.options.items() if library is not None else []):
+        if name not in library.chosen:
+            for entry in option.code_files:
+                unchosen[(result.destination / entry.destination).resolve()] = name
+
     print()
     print(console.heading("Files"))
 
@@ -127,8 +197,9 @@ def _print_files(result, root):
                            f"{_show(old, root)} -> {_show(new, root)}", console.CYAN))
 
     for path in result.dropped:
-        print(console.item("removed", "no longer part of the library", _show(path, root),
-                           console.YELLOW))
+        option = unchosen.get(Path(path).resolve())
+        why = f"option {option} is off" if option else "no longer part of the library"
+        print(console.item("removed", why, _show(path, root), console.YELLOW))
 
     for path, names in result.preserved:
         print(console.item("kept", "your USER CODE " + ", ".join(names), _show(path, root),
@@ -231,10 +302,10 @@ def _show(path, root):
 
 def _finish(library, result, project_root, only_ide):
     """The part shared by every install route."""
-    _print_files(result, project_root)
+    _print_files(result, project_root, library)
 
     outcomes = ide.integrate(project_root, library, result.destination, only=only_ide,
-                             dropped=result.dropped)
+                             dropped=result.dropped, dropped_defines=result.dropped_defines)
     _print_ide(outcomes)
     _print_next(result, project_root, library)
 
@@ -476,7 +547,7 @@ def _plan(requested, project_root, staged):
     def visit(source, chain):
         name = source.library.name
 
-        for dependency in source.library.requires.libraries:
+        for dependency in source.library.dependencies:
             if dependency.name in chain:
                 circle = " -> ".join(chain + [dependency.name])
                 raise _PlanError(f"These libraries need each other in a circle: {circle}")
@@ -505,7 +576,12 @@ def _plan(requested, project_root, staged):
                 planned[dependency.name] = have_version
                 continue
 
-            other = given.get(dependency.name) or _fetch_dependency(dependency, name, staged)
+            other = given.get(dependency.name)
+
+            if other is None:
+                other = _fetch_dependency(dependency, name, staged)
+                # Its options before what it needs, since they can bring more.
+                _choose_options(other.library, project_root)
 
             if not dependency.satisfied_by(other.library.version):
                 raise _PlanError(
@@ -530,6 +606,39 @@ def _plan(requested, project_root, staged):
         planned[source.library.name] = source.library.version
 
     return steps
+
+
+def _settle_options(requested, project_root, args):
+    """
+    Choose the options of every library named on the command line.
+
+    A name given to --with or --without that none of them has is refused
+    before anything is asked or installed, since it is almost always a typo,
+    and going ahead without it would install something other than what was
+    asked for. Returns None, or the exit code to stop with.
+    """
+    turn_on = list(args.with_options or [])
+    turn_off = list(args.without_options or [])
+    offered = sorted({name for source in requested for name in source.library.options})
+
+    both = sorted(set(turn_on) & set(turn_off))
+
+    if both:
+        _error(f"{', '.join(both)} is given to both --with and --without. Give it to one.")
+        return 2
+
+    unknown = sorted(set(turn_on + turn_off) - set(offered))
+
+    if unknown:
+        has = (f"What is installed here has: {', '.join(offered)}." if offered
+               else "What is installed here has no options.")
+        _error(f"No option called {', '.join(unknown)}. {has}")
+        return 2
+
+    for source in requested:
+        _choose_options(source.library, source.project_root or project_root, turn_on, turn_off, ask=True)
+
+    return None
 
 
 def _default_folder(library, project_root):
@@ -649,6 +758,12 @@ def _run(args, parser, library_root):
 
             requested.append(source)
 
+        # Before the plan, since an option taken can bring libraries of its own.
+        code = _settle_options(requested, project_root, args)
+
+        if code is not None:
+            return code
+
         try:
             steps = _plan(requested, project_root, staged)
         except _PlanError as error:
@@ -691,6 +806,23 @@ def main(argv=None, library_root=None):
         "its main or master.",
     )
     parser.add_argument("--dir", dest="folder", default=None, help="folder to install into.")
+    parser.add_argument(
+        "--with",
+        dest="with_options",
+        action="append",
+        metavar="OPTION",
+        default=None,
+        help="take this option of the library, such as littlefs for spif, without being "
+        "asked. Give it once for each option.",
+    )
+    parser.add_argument(
+        "--without",
+        dest="without_options",
+        action="append",
+        metavar="OPTION",
+        default=None,
+        help="leave this option out, or take it out of a library already installed.",
+    )
     parser.add_argument(
         "--project", default=None, help="root of your STM32 project. Defaults to this folder."
     )

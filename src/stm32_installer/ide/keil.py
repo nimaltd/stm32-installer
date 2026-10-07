@@ -24,6 +24,7 @@ from .base import (
     MANUAL,
     Outcome,
     backup,
+    clash_steps,
     compiled_names,
     element_indent,
     forward_slashes,
@@ -34,6 +35,7 @@ from .base import (
     insert_before,
     is_backup,
     line_ending,
+    plan_defines,
     read,
     relative,
     write,
@@ -55,6 +57,11 @@ GROUPS = re.compile(r"(<Groups>)(.*?)(</Groups>)", re.DOTALL)
 # One <File> element as whole lines, with whatever per-file options uVision has
 # stored inside it. Elements do not nest, so the first </File> is its own.
 FILE_ELEMENT = re.compile(r"^[ \t]*<File>.*?</File>[ \t]*\r?\n", re.DOTALL | re.MULTILINE)
+
+# The C compiler settings of one target. The defines go in its <Define>, beside
+# USE_HAL_DRIVER, and never in the one under <Aads>, which is the assembler's.
+CADS = re.compile(r"<Cads>.*?</Cads>", re.DOTALL)
+DEFINE = re.compile(r"(<Define>)(.*?)(</Define>)", re.DOTALL)
 
 
 def detect(project_root):
@@ -188,12 +195,55 @@ def _add_beside(text, missing, library, newline):
     return text
 
 
-def integrate(uvprojx, library, destination, project_root, dropped=()):
+def _edit_defines(text, wanted, dropped):
     """
-    Register the library's sources and include path with a Keil project.
+    Bring the C define list of every target in step with the library.
+
+    uVision separates them with commas, as CubeMX writes them, or with spaces,
+    and reads either. What is added uses whichever the list already has.
+
+    Returns the new text, the defines left alone because the list already sets
+    the same name to something else, and whether any target had a list at all.
+    """
+    clashes = []
+    found_any = False
+    pieces = []
+    last = 0
+
+    for block in CADS.finditer(text):
+        match = DEFINE.search(text, block.start(), block.end())
+
+        if match is None:
+            continue
+
+        found_any = True
+        written = match.group(2)
+        present = [part for part in re.split(r"[,\s]+", written) if part]
+        remove, add, found = plan_defines(present, wanted, dropped)
+        clashes += [pair for pair in found if pair not in clashes]
+
+        if not remove and not add:
+            continue
+
+        sep = ", " if ", " in written else ("," if "," in written or " " not in written.strip() else " ")
+        kept = [part for part in present if part not in remove]
+
+        pieces.append(text[last:match.start(2)])
+        pieces.append(sep.join(kept + add))
+        last = match.end(2)
+
+    pieces.append(text[last:])
+
+    return "".join(pieces), clashes, found_any
+
+
+def integrate(uvprojx, library, destination, project_root, dropped=(), dropped_defines=()):
+    """
+    Register the library's sources, include path and defines with a Keil project.
 
     dropped lists the library files an update has just removed, so the entries
-    that named them can follow the file to its new place or go.
+    that named them can follow the file to its new place or go. dropped_defines
+    are taken out of the define lists.
     """
     path = Path(uvprojx)
     # Paths inside a .uvprojx are relative to the folder holding it.
@@ -265,9 +315,22 @@ def integrate(uvprojx, library, destination, project_root, dropped=()):
         return match.group(1) + ";".join(parts) + match.group(3)
 
     updated = INCLUDE_PATH.sub(add_include, updated)
+    updated, clashes, has_list = _edit_defines(updated, library.defines, dropped_defines)
+    steps = clash_steps(clashes, path.name)
+
+    # Without a define list the library would build, but with its defaults
+    # instead of the settings it reads through the define, and nothing would
+    # say so. So it is said here.
+    unplaced = bool(library.defines) and not has_list
+
+    if unplaced:
+        steps += _define_steps(library.defines)
+
+    if updated == text and unplaced:
+        return Outcome(NAME, MANUAL, f"{path.name} has {library.name}, but no define list to add to.", steps)
 
     if updated == text:
-        return Outcome(NAME, ALREADY, f"{path.name} already has {library.name}.")
+        return Outcome(NAME, ALREADY, f"{path.name} already has {library.name}.", steps)
 
     saved = backup(path)
 
@@ -277,12 +340,19 @@ def integrate(uvprojx, library, destination, project_root, dropped=()):
         return Outcome(NAME, MANUAL, f"Could not write {path.name}: {error}",
                        _manual_steps(folder), saved)
 
+    message = (
+        f"Updated {library.name} in {path.name}." if was_there
+        else f"Added {library.name} to {path.name} in {len(containers)} target(s)."
+    )
+
+    if unplaced:
+        return Outcome(NAME, MANUAL, message[:-1] + ", but found no define list to add to.", steps, saved)
+
     return Outcome(
         NAME,
         CHANGED,
-        f"Updated {library.name} in {path.name}." if was_there
-        else f"Added {library.name} to {path.name} in {len(containers)} target(s).",
-        steps=["Close and reopen the project in uVision so it reloads the file list."],
+        message,
+        steps=steps + ["Close and reopen the project in uVision so it reloads the file list."],
         backup=saved,
     )
 
@@ -296,4 +366,13 @@ def _manual_steps(folder):
         f"add a group and add the .c files from {windows_folder} to it.",
         "Then Options for Target, C/C++, Include Paths,",
         f"and add {windows_folder}.",
+    ]
+
+
+def _define_steps(defines):
+    """What to click to add the library's defines by hand."""
+    return [
+        "In uVision: Options for Target, C/C++, Preprocessor Symbols, and add to Define,",
+        "for every target:",
+        "    " + ",".join(defines),
     ]

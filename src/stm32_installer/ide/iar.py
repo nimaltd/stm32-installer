@@ -34,6 +34,7 @@ from .base import (
     MANUAL,
     Outcome,
     backup,
+    clash_steps,
     compiled_names,
     element_indent,
     forward_slashes,
@@ -44,6 +45,7 @@ from .base import (
     insert_before,
     is_backup,
     line_ending,
+    plan_defines,
     read,
     relative,
     write,
@@ -56,6 +58,15 @@ INCLUDE_OPTION = re.compile(
     r"(<option>\s*<name>CCIncludePath2</name>)(.*?)(</option>)",
     re.DOTALL,
 )
+
+# The compiler's defines, beside USE_HAL_DRIVER, once per build configuration.
+DEFINE_OPTION = re.compile(
+    r"(<option>\s*<name>CCDefines</name>)(.*?)(</option>)",
+    re.DOTALL,
+)
+
+# One value in an option. An empty <state></state> holds none.
+STATE = re.compile(r"<state>([^<]*)</state>")
 
 # A source file already in the project, read to see which slash is used and to
 # tell whether the library's files are in the project already.
@@ -259,12 +270,43 @@ def _with_group(text, library_name, folder, sources, dropped=()):
     return text[:at] + newline + _group(library_name, names, pad, step, newline) + text[at:]
 
 
-def integrate(ewp, library, destination, project_root, dropped=()):
+def _edit_defines(text, wanted, dropped, newline):
     """
-    Register the library's sources and include path with an IAR project.
+    Bring the define list of every configuration in step with the library.
+
+    Returns the new text and the defines left alone because the list already
+    sets the same name to something else.
+    """
+    clashes = []
+
+    def edit(match):
+        body = match.group(2)
+        present = [value for value in STATE.findall(body) if value.strip()]
+        remove, add, found = plan_defines(present, wanted, dropped)
+        clashes.extend(pair for pair in found if pair not in clashes)
+
+        if not remove and not add:
+            return match.group(0)
+
+        for define in remove:
+            body = re.sub(r"\r?\n[ \t]*<state>" + re.escape(define) + r"</state>", "", body, count=1)
+
+        outer = indent_of(match.string, match.start())
+        inner = inner_indent(match.group(2), outer)
+        added = "".join(f"{newline}{inner}<state>{define}</state>" for define in add)
+
+        return match.group(1) + body.rstrip() + added + newline + outer + match.group(3)
+
+    return DEFINE_OPTION.sub(edit, text), clashes
+
+
+def integrate(ewp, library, destination, project_root, dropped=(), dropped_defines=()):
+    """
+    Register the library's sources, include path and defines with an IAR project.
 
     dropped lists the library files an update has just removed, so the entries
-    that named them can follow the file to its new place or go.
+    that named them can follow the file to its new place or go. dropped_defines
+    are taken out of the define lists.
     """
     path = Path(ewp)
     dropped = compiled_names(dropped, destination)
@@ -314,9 +356,22 @@ def integrate(ewp, library, destination, project_root, dropped=()):
     updated = _with_group(
         INCLUDE_OPTION.sub(add_include, text), library.name, folder, library.build_sources, dropped
     )
+    updated, clashes = _edit_defines(updated, library.defines, dropped_defines, newline)
+    notes = clash_steps(clashes, path.name)
+
+    # Without a define list the library would build, but with its defaults
+    # instead of the settings it reads through the define, and nothing would
+    # say so. So it is said here.
+    unplaced = bool(library.defines) and not DEFINE_OPTION.search(text)
+
+    if unplaced:
+        notes += _define_steps(library.defines)
+
+    if updated == text and unplaced:
+        return Outcome(NAME, MANUAL, f"{path.name} has {library.name}, but no define list to add to.", notes)
 
     if updated == text:
-        return Outcome(NAME, ALREADY, f"{path.name} already has {library.name}.")
+        return Outcome(NAME, ALREADY, f"{path.name} already has {library.name}.", notes)
 
     saved = backup(path)
 
@@ -332,13 +387,15 @@ def integrate(ewp, library, destination, project_root, dropped=()):
     if also:
         steps.insert(0, also)
 
-    return Outcome(
-        NAME,
-        CHANGED,
-        f"Updated {library.name} in {path.name}." if was_there else f"Added {library.name} to {path.name}.",
-        steps=steps,
-        backup=saved,
+    message = (
+        f"Updated {library.name} in {path.name}." if was_there else f"Added {library.name} to {path.name}."
     )
+
+    if unplaced:
+        return Outcome(NAME, MANUAL, message[:-1] + ", but found no define list to add to.",
+                       notes + steps, saved)
+
+    return Outcome(NAME, CHANGED, message, steps=notes + steps, backup=saved)
 
 
 def _sync_companion(ewp, library, folder, dropped=()):
@@ -386,3 +443,11 @@ def _manual_steps(folder):
         "Then Project, Options, C/C++ Compiler, Preprocessor,",
         f"and add $PROJ_DIR$/{folder} to the include directories.",
     ]
+
+
+def _define_steps(defines):
+    """What to click to add the library's defines by hand."""
+    return [
+        "In IAR: Project, Options, C/C++ Compiler, Preprocessor, and add to",
+        "Defined symbols, one per line, in every configuration:",
+    ] + [f"    {define}" for define in defines]

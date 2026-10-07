@@ -113,6 +113,8 @@ The zip does not need unpacking first. If you did unpack it with Windows' **Extr
 | `--ref v2.0.0` | A tag, a branch or a commit to take from GitHub. When not given, `main`, or `master` for a repository that has no `main`. It applies to the libraries you name, and a library one of them needs always comes from its `main` or `master` |
 | `--dir Libs/example` | The folder of your project to install into, for one library. Asked for when not given, with the library's name as the answer if you just press Enter, or the folder it is already in |
 | `--project D:/Work/MyBoard` | Your project's root, when you are not running from it |
+| `--with littlefs` | Take this part of the library without being asked. Give it once for each part. See [Parts you choose](#parts-you-choose) |
+| `--without littlefs` | Leave this part out, or take it out of a library already installed |
 | `--ide cubeide` | Register with this IDE only: `cmake`, `cubeide`, `keil`, `iar` or `makefile`. Every one found, when not given |
 | `--version` | Show which version of the installer you have, and do nothing else |
 
@@ -139,6 +141,26 @@ Folder to install example into [example]:
 ```
 
 Press Enter for the default: the library's name, or the folder it is already in when this is an update. In a script or on a build server, where nobody is there to answer, the default is taken without asking, rather than waiting for ever.
+
+### Parts you choose
+
+Some libraries have a part not every project wants, such as LittleFS support in a flash driver. The first install asks about each one:
+
+```
+Options
+  littlefs   LittleFS file system on the flash. Add it? [y/N]:
+```
+
+Anything but `y` or `yes` leaves it out. A yes brings the part's files, and any library it needs, which goes in first like any other. In a script, where nobody can answer, it is left out, and `--with littlefs` takes it without a question.
+
+The answer is kept in `.stm32-installer.json` in your project, so an update does not ask again. It says what it kept, and how to change it:
+
+```
+Options
+  littlefs   yes, as before. Change it with --without littlefs
+```
+
+Change your mind with `--with` or `--without` on any later run. `--without littlefs` takes the part's files out of the library's folder and out of your IDE project. A library the part brought stays, since something else may use it by then. A part that a new version adds is asked about on that update. Keep `.stm32-installer.json` with your project, in version control: without it the installer remembers nothing, and asks again.
 
 ### Updating a library
 
@@ -197,7 +219,7 @@ You are asked for its folder like any library. Install a second library that nee
 spif 3.0.0 needs osal >= 1.0.0. osal 1.0.0 is already in this project, kept.
 ```
 
-Nothing is asked about it then. If a library needs a newer `osal` than the one you have, it is updated where it is, and your `osal_config.h` is kept as always. Everything is fetched before anything is installed, so when a library cannot be had, your project is left as it was.
+Nothing is asked about it then. If a library needs a newer `osal` than the one you have, it is updated where it is, and your setting in `osal_config.h`, between its `USER CODE` lines, is kept as always. Everything is fetched before anything is installed, so when a library cannot be had, your project is left as it was.
 
 ### What you see
 
@@ -317,6 +339,8 @@ install:
   layout: mirror        # mirror keeps the repository's own folders, so the
                         # code lands in src/ just as it sits here. flat (the
                         # default) puts every file at the top of the folder.
+  defines:              # given to the whole project, beside USE_HAL_DRIVER
+    - EXAMPLE_FAST      # NAME, or NAME=value
 
 files:
   headers:
@@ -326,6 +350,15 @@ files:
     - src/example.c
     - from: src/port/spi.c    # a file can say exactly where it goes, which
       to: port/spi.c          # overrides the layout for that one file
+
+options:                # parts the user chooses at install, see below
+  littlefs:
+    description: LittleFS file system on the flash
+    libraries:
+      - littlefs >= 2.11.0
+    files:
+      sources:
+        - src/example_lfs.c
 
 once:                   # older libraries only: copied once, then the user's.
   - from: src/example_port.c  # USER CODE sections, below, replace this
@@ -360,6 +393,41 @@ requires:
 ```
 
 What is missing or older than that goes in first, from its `main`, or its `master` when it has no `main`. What is already in the project at a version that will do is left alone. An installer older than 1.5.0 only names them at the end and installs nothing, which is why `requires.installer` goes up with the first library that lists any.
+
+### defines
+
+Some code reads its settings from a define the compiler is given, not from a file. littlefs is one: it reads a settings header only when built with `-DLFS_DEFINES=lfs_defines.h`. List such a define under `install.defines`, and the installer puts it where the project keeps `USE_HAL_DRIVER`: the generated CMakeLists.txt, every configuration in `.cproject`, every target in Keil, every configuration in IAR, and `C_DEFS` in a CubeMX Makefile.
+
+It goes to the whole project, not only to the library's files, because a define can change what the library's header declares. littlefs built with `LFS_THREADSAFE` has two more members in `struct lfs_config`, and a file of yours that did not see the define would put every member after them in the wrong place, with no error from the compiler.
+
+Write each as `NAME` or `NAME=value`, with letters, digits and `_ . + - /` only. A space or a quote is refused, since each define is written as it stands into XML, a Makefile and a Keil list. An update takes out a define the library no longer lists and changes one whose value it changed. A define the project already sets to another value is left alone and reported, because it may be the user's own choice.
+
+A library that lists defines must say `requires.installer: 1.8.0`. An older installer would ignore them without a word, and the library would build with its defaults.
+
+### options
+
+A part of your library that not every project wants, such as spif's port for LittleFS, goes under `options`. Each is asked about at the first install, and its files and the libraries it needs come only with a yes:
+
+```yaml
+options:
+  littlefs:                         # the name typed after --with
+    description: LittleFS file system on the flash
+    libraries:
+      - littlefs >= 2.11.0          # installed first, like requires.libraries
+    files:
+      headers:
+        - src/spif_lfs.h
+      sources:
+        - src/spif_lfs.c
+```
+
+The `description` is the question, so write it as what the part is. The name is lower case letters, digits, `_` and `-`, since people type it.
+
+An option's files are your library's files like any other. They land in the same folder, are replaced on every install with their USER CODE sections kept, and are removed by the update that turns the option off. So a file belongs to the library or to one option, never both, and a manifest that lists one twice is refused. Every option's files are downloaded whichever are taken, so an answer never needs a second download. Installed in place, the files of an option not taken are deleted from the folder, since STM32CubeIDE would otherwise compile them.
+
+`--with` and `--without` apply to the libraries named on the command line. A library that comes in because another needs it keeps the answer it had, and an option of it that was never chosen stays out.
+
+A library with options must say `requires.installer: 1.8.0`. An older installer would install it without them, and never ask.
 
 ### USER CODE sections
 

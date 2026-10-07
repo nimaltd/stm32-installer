@@ -68,6 +68,18 @@ UPDATE_COMMAND = "pip install --upgrade stm32-installer"
 # by one, so this also decides which files an update has to tell them about.
 COMPILED = (".c", ".cpp", ".cc", ".cxx", ".s", ".asm")
 
+# A define as -D takes it: NAME, or NAME=value. The manifest arrives over the
+# network and each define is written as it stands into XML, a Makefile and a
+# Keil list, so only characters all of them hold safely, with nothing to quote,
+# get through. A space or a quote could otherwise carry a second compiler flag
+# in with it.
+DEFINE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:=[A-Za-z0-9_.+/-]+)?$")
+
+
+def define_name(define):
+    """The name a define sets, without its value: HSE_VALUE from HSE_VALUE=8000000."""
+    return str(define).split("=", 1)[0].strip()
+
 
 def _version_tuple(text):
     """(1, 2, 0) from "1.2.0", or None when it is not three whole numbers."""
@@ -359,6 +371,45 @@ class Dependency:
         return f"Dependency({self})"
 
 
+# An option's name, as typed after --with. Lower case only, so one word on the
+# command line always means one option.
+OPTION_NAME = re.compile(r"^[a-z][a-z0-9_-]*$")
+
+
+class Option:
+    """
+    A part of a library the user chooses at install, as littlefs is for spif.
+
+    It brings files of the library's own, installed only when it is chosen, and
+    other libraries it needs, installed with it. A file it brings is a library
+    file like any other: replaced on every install, its USER CODE kept, and
+    removed by the update that turns the option off.
+    """
+
+    def __init__(self, root, name, data, layout, known=None):
+        if not isinstance(data, dict):
+            raise ManifestError(f"options.{name} should hold a description, and the files and libraries it brings.")
+
+        self.name = name
+        self.description = str(data.get("description") or "").strip()
+        self.libraries = [Dependency(x) for x in (data.get("libraries") or [])]
+
+        files = data.get("files") or {}
+
+        if not isinstance(files, dict):
+            raise ManifestError(f"options.{name}.files should hold 'headers' and 'sources' lists.")
+
+        self.headers = _entries(root, files.get("headers"), layout, known)
+        self.sources = _entries(root, files.get("sources"), layout, known)
+
+    @property
+    def code_files(self):
+        return self.headers + self.sources
+
+    def __repr__(self):
+        return f"Option({self.name})"
+
+
 class Requirements:
     """Everything a library needs from the project it is dropped into."""
 
@@ -425,14 +476,43 @@ class Manifest:
             for entry in (data.get("once") or [])
         ]
 
-        # Which folders go on the IDE's include path, worked out from where the
-        # headers actually landed unless the manifest says otherwise.
+        # Which folders go on the IDE's include path. Worked out from where the
+        # headers land, see include_dirs, unless the manifest says.
         declared = install.get("include_dirs")
-        self.include_dirs = (
-            [str(d).replace("\\", "/") for d in declared]
-            if declared
-            else sorted({entry.folder for entry in self.headers}) or ["."]
-        )
+        self.declared_include_dirs = [str(d).replace("\\", "/") for d in declared] if declared else None
+        # Defines the whole project is built with, for a library that reads its
+        # settings through one, as littlefs reads LFS_DEFINES. The whole project
+        # and not only the library's own files, because a define can change
+        # what its header declares, and every file including it has to agree.
+        # Checked in load(), since each is written into the user's project as
+        # it stands.
+        declared = install.get("defines") or []
+
+        if not isinstance(declared, list):
+            raise ManifestError("install.defines should be a list, one define per line.")
+
+        self.defines = [str(d).strip() for d in declared]
+
+        # Parts the user chooses at install. None is chosen until choose() says,
+        # so whatever installs a library without asking, an older caller or a
+        # test, gets it without its options rather than with all of them.
+        options = data.get("options") or {}
+
+        if not isinstance(options, dict):
+            raise ManifestError("options should name each option, with what it brings under it.")
+
+        self.options = {}
+
+        for name, value in options.items():
+            if not OPTION_NAME.match(str(name)):
+                raise ManifestError(
+                    f"options has {name!r}. Name an option in lower case letters, digits, _ and -, "
+                    "starting with a letter, since it is typed after --with."
+                )
+
+            self.options[str(name)] = Option(self.root, str(name), value, self.layout, known)
+
+        self.chosen = []
         # Copied verbatim alongside the code. The Apache licence wants both of
         # these to travel with it, and NOTICE is what carries the attribution.
         # Extras are optional by nature, so an entry that matches nothing is a
@@ -450,10 +530,50 @@ class Manifest:
             if not found and item not in ("LICENSE.md", "NOTICE"):
                 self.empty_extras.append(str(item))
 
+    def choose(self, names):
+        """Take these options in this install, and no others."""
+        unknown = [name for name in names if name not in self.options]
+
+        if unknown:
+            raise ManifestError(f"{self.name} has no option called {', '.join(unknown)}.")
+
+        self.chosen = [name for name in self.options if name in names]
+
+    def _chosen_files(self, kind):
+        """The headers or the sources of the options taken."""
+        return [entry for name in self.chosen for entry in getattr(self.options[name], kind)]
+
     @property
     def code_files(self):
-        """Headers and sources together. These are replaced on every install."""
-        return self.headers + self.sources
+        """
+        Headers and sources together, with those of the options taken. These
+        are replaced on every install.
+        """
+        return self.headers + self.sources + self._chosen_files("headers") + self._chosen_files("sources")
+
+    @property
+    def all_code_files(self):
+        """Every code file the manifest names, whatever is chosen, for checking it."""
+        return self.headers + self.sources + [e for option in self.options.values() for e in option.code_files]
+
+    @property
+    def include_dirs(self):
+        """
+        The folders that go on the IDE's include path.
+
+        Where the headers land, those of the options taken included, unless
+        the manifest names them. An option that is not taken adds nothing, so
+        no include path points at a folder that was never installed.
+        """
+        if self.declared_include_dirs:
+            return list(self.declared_include_dirs)
+
+        return sorted({entry.folder for entry in self.headers + self._chosen_files("headers")}) or ["."]
+
+    @property
+    def dependencies(self):
+        """The libraries this one needs, with those the options taken bring."""
+        return self.requires.libraries + [d for name in self.chosen for d in self.options[name].libraries]
 
     @property
     def build_sources(self):
@@ -473,14 +593,17 @@ class Manifest:
         """
         return [
             entry.destination
-            for entry in list(self.sources) + list(self.once)
+            for entry in list(self.sources) + self._chosen_files("sources") + list(self.once)
             if Path(entry.destination).suffix.lower() in COMPILED
         ]
 
     @property
     def required_files(self):
-        """Every repository path the manifest promises. Extras are optional."""
-        return [entry.source for entry in self.code_files] + [e.source for e in self.once]
+        """
+        Every repository path the manifest promises, those of every option
+        included, chosen or not. Extras are optional.
+        """
+        return [entry.source for entry in self.all_code_files] + [e.source for e in self.once]
 
     def present_extras(self):
         """Extras to copy. Already expanded, so every one of these exists."""
@@ -495,9 +618,31 @@ class Manifest:
         output still reported it as kept. A wildcard that happens to sweep up
         the config header is the usual way this happens.
         """
-        code = {entry.source.as_posix() for entry in self.code_files}
+        code = {entry.source.as_posix() for entry in self.all_code_files}
 
         return sorted(code & {entry.source.as_posix() for entry in self.once})
+
+    def shared_option_files(self):
+        """
+        Files an option brings that the library, or another option, also lists.
+
+        A file belongs to one place. One that is the library's and an option's
+        both would be removed by the update that turns the option off, while the
+        library still needs it.
+        """
+        owner = {entry.source.as_posix(): None for entry in self.headers + self.sources}
+        shared = set()
+
+        for name, option in self.options.items():
+            for entry in option.code_files:
+                path = entry.source.as_posix()
+
+                if path in owner and owner[path] != name:
+                    shared.add(path)
+
+                owner.setdefault(path, name)
+
+        return sorted(shared)
 
     def missing_files(self):
         """Files the manifest promises but the repository does not contain."""
@@ -534,6 +679,10 @@ def _warnings(manifest):
 
     for entry in manifest.empty_extras:
         found.append(f"extras entry '{entry}' matched no file")
+
+    for name, option in manifest.options.items():
+        if not option.description:
+            found.append(f"option '{name}' has no description, so the question about it is only its name")
 
     return found
 
@@ -614,9 +763,16 @@ def load(library_root, strict=False, known=None):
     # the user's own code rather than the folder they agreed to.
     escaping = [
         entry.destination
-        for entry in manifest.code_files + manifest.once
+        for entry in manifest.all_code_files + manifest.once
         if _escapes(entry.destination)
     ]
+
+    shared = manifest.shared_option_files()
+    if shared:
+        raise ManifestError(
+            f"{path} lists these both in an option and somewhere else, so turning the option "
+            f"off would remove a file still needed: " + ", ".join(shared)
+        )
 
     clashing = manifest.clashes()
     if clashing:
@@ -631,6 +787,21 @@ def load(library_root, strict=False, known=None):
             f"{path} sends files outside the install folder, which is never allowed: "
             + ", ".join(escaping)
         )
+
+    # Refused like an escaping path, and for the same reason: what is written
+    # here lands in the user's project files as it stands.
+    for define in manifest.defines:
+        if not DEFINE.match(define):
+            raise ManifestError(
+                f"{path}: install.defines has {define!r}. Write a define as NAME or "
+                "NAME=value, using letters, digits and _ . + - / only."
+            )
+
+    names = [define_name(d) for d in manifest.defines]
+    twice = sorted({name for name in names if names.count(name) > 1})
+
+    if twice:
+        raise ManifestError(f"{path}: install.defines sets {', '.join(twice)} more than once.")
 
     problems = _warnings(manifest)
     if problems and strict:

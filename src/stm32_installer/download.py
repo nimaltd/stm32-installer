@@ -156,6 +156,17 @@ def _listed_entries(data):
     """
     files = data.get("files") or {}
     listed = list(files.get("headers") or []) + list(files.get("sources") or [])
+
+    # Every option's files, chosen or not. Which are taken is asked once the
+    # library is on disk, and the answer must not need a second download.
+    options = data.get("options")
+
+    for option in (options.values() if isinstance(options, dict) else []):
+        extra = option.get("files") if isinstance(option, dict) else None
+
+        if isinstance(extra, dict):
+            listed += list(extra.get("headers") or []) + list(extra.get("sources") or [])
+
     listed += data.get("once") or []
     listed += data.get("extras") or ["LICENSE.md", "NOTICE"]
 

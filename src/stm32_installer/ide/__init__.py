@@ -38,7 +38,7 @@ def detect(project_root):
     return found
 
 
-def integrate(project_root, library, destination, only=None, dropped=()):
+def integrate(project_root, library, destination, only=None, dropped=(), dropped_defines=()):
     """
     Register a library with every IDE found in the project.
 
@@ -50,6 +50,8 @@ def integrate(project_root, library, destination, only=None, dropped=()):
         dropped: files an update just removed, because the new version no
             longer ships them there. An IDE that names every file has to be
             told, or it keeps pointing at files that are gone.
+        dropped_defines: defines the last install of this library put in the
+            project and this version no longer asks for.
 
     Returns:
         A list of Outcome, one per IDE. Empty when no IDE was recognised.
@@ -61,7 +63,9 @@ def integrate(project_root, library, destination, only=None, dropped=()):
             continue
 
         try:
-            outcomes.append(backend.integrate(path, library, destination, project_root, dropped))
+            outcomes.append(
+                backend.integrate(path, library, destination, project_root, dropped, dropped_defines)
+            )
         except Exception as error:
             # An integration must never take the install down with it. The files
             # are already copied, and the user can finish the job by hand.

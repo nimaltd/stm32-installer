@@ -21,11 +21,13 @@ from .base import (
     MANUAL,
     Outcome,
     backup,
+    clash_steps,
     include_folders,
     indent_of,
     inner_indent,
     insert_before,
     line_ending,
+    plan_defines,
     read,
     relative,
     write,
@@ -43,6 +45,20 @@ INCLUDE_OPTION = re.compile(
     r"(</option>)",
     re.IGNORECASE | re.DOTALL,
 )
+
+# The "Define symbols (-D)" list of the C and the C++ compiler, the one holding
+# USE_HAL_DRIVER, once per build configuration. The assembler has a list of its
+# own, ...assembler.option.definedsymbols, which this does not match: a define
+# that shapes a C header means nothing to it.
+DEFINE_OPTION = re.compile(
+    r'(<option[^>]*superClass="[^"]*compiler\.option\.definedsymbols"[^>]*(?<!/)>)'
+    r"(.*?)"
+    r"(</option>)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# One value in such a list.
+LIST_VALUE = re.compile(r'<listOptionValue\b[^>]*\bvalue="([^"]*)"[^>]*/>')
 
 # The list of folders one build configuration compiles, and its body.
 SOURCE_ENTRIES = re.compile(r"(<sourceEntries>)(.*?)(</sourceEntries>)", re.DOTALL)
@@ -107,6 +123,45 @@ def _add_include_paths(text, wanted, newline):
     return updated
 
 
+def _edit_defines(text, wanted, dropped, newline):
+    """
+    Bring the define list of every configuration in step with the library.
+
+    Returns the new text and the defines left alone because the list already
+    sets the same name to something else.
+    """
+    updated = text
+    clashes = []
+
+    for match in reversed(list(DEFINE_OPTION.finditer(text))):
+        body = match.group(2)
+        remove, add, found = plan_defines(LIST_VALUE.findall(body), wanted, dropped)
+        clashes += [pair for pair in found if pair not in clashes]
+
+        if not remove and not add:
+            continue
+
+        for define in remove:
+            body = re.sub(
+                r"\r?\n[ \t]*<listOptionValue\b[^>]*\bvalue=\"" + re.escape(define) + r"\"[^>]*/>",
+                "",
+                body,
+                count=1,
+            )
+
+        # Appended after the values already there, which is where CubeIDE puts
+        # one added through the Properties dialog.
+        inner = inner_indent(match.group(2), indent_of(text, match.start()))
+        cut = len(body.rstrip(" \t\r\n"))
+        body = body[:cut] + "".join(
+            f'{newline}{inner}<listOptionValue builtIn="false" value="{define}"/>' for define in add
+        ) + body[cut:]
+
+        updated = updated[:match.start(2)] + body + updated[match.end(2):]
+
+    return updated, clashes
+
+
 def _add_source_folder(text, folder, newline):
     """
     Register the library folder as one the project compiles.
@@ -143,12 +198,13 @@ def _add_source_folder(text, folder, newline):
     return updated
 
 
-def integrate(cproject, library, destination, project_root, dropped=()):
+def integrate(cproject, library, destination, project_root, dropped=(), dropped_defines=()):
     """
-    Add the library to the include path and the source folders.
+    Add the library to the include path, the source folders and the defines.
 
     dropped needs nothing here: CubeIDE compiles whatever is in a source
     folder, so a file removed from disk has left the build as well.
+    dropped_defines are taken out of the define lists.
     """
     path = Path(cproject)
     folder = relative(destination, project_root)
@@ -176,10 +232,25 @@ def integrate(cproject, library, destination, project_root, dropped=()):
     updated = _add_include_paths(text, wanted, newline)
     with_sources = _add_source_folder(updated, folder, newline)
     registered = with_sources != updated
-    updated = with_sources
+    with_defines, clashes = _edit_defines(with_sources, library.defines, dropped_defines, newline)
+    defined = with_defines != with_sources
+    updated = with_defines
+
+    steps = clash_steps(clashes, ".cproject")
+
+    # Without a define list the library would build, but with its defaults
+    # instead of the settings it reads through the define, and nothing would
+    # say so. So it is said here.
+    unplaced = library.defines and not DEFINE_OPTION.search(text)
+
+    if unplaced:
+        steps += _define_steps(library.defines)
+
+    if updated == text and unplaced:
+        return Outcome(NAME, MANUAL, f"{folder} is in .cproject, but found no define list to add to.", steps)
 
     if updated == text:
-        return Outcome(NAME, ALREADY, f"{folder} is already set up in .cproject.")
+        return Outcome(NAME, ALREADY, f"{folder} is already set up in .cproject.", steps)
 
     saved = backup(path)
 
@@ -189,13 +260,23 @@ def integrate(cproject, library, destination, project_root, dropped=()):
         return Outcome(NAME, MANUAL, f"Could not write .cproject: {error}",
                        _manual_steps(folder), saved)
 
-    told = "include path and source folders" if registered else "include path"
+    told = ["include path"] + (["source folders"] if registered else []) + (["defines"] if defined else [])
+    told = ", ".join(told[:-1]) + " and " + told[-1] if len(told) > 1 else told[0]
+
+    if unplaced:
+        return Outcome(
+            NAME,
+            MANUAL,
+            f"Added {folder} to the {told} in .cproject, but found no define list to add to.",
+            steps,
+            saved,
+        )
 
     return Outcome(
         NAME,
         CHANGED,
         f"Added {folder} to the {told} in .cproject.",
-        steps=["Refresh the project in CubeIDE (F5) so it picks up the new files."],
+        steps=steps + ["Refresh the project in CubeIDE (F5) so it picks up the new files."],
         backup=saved,
     )
 
@@ -208,4 +289,13 @@ def _manual_steps(folder):
         f'then add "{folder}" as a workspace path.',
         f'If {folder} is greyed out in the project tree, right click it and',
         "choose Resource Configurations, Exclude from Build, and clear it.",
+    ]
+
+
+def _define_steps(defines):
+    """What to click to add the library's defines by hand."""
+    return [
+        "In STM32CubeIDE: right click the project, Properties, C/C++ Build, Settings,",
+        "MCU GCC Compiler, Preprocessor, and add to Define symbols, in every configuration:",
+        "    " + " ".join(defines),
     ]

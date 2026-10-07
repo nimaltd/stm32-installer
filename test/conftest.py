@@ -32,6 +32,7 @@ def library(tmp_path):
         install=None,
         extra_files=None,
         root=None,
+        options=None,
     ):
         root = Path(root) if root else tmp_path / name
         root.mkdir(parents=True, exist_ok=True)
@@ -53,6 +54,14 @@ def library(tmp_path):
 
         written.update({source_of(h): "/* header */\n" for h in headers if source_of(h)})
         written.update({source_of(s): "/* source */\n" for s in sources if source_of(s)})
+
+        # An option's files are written like the library's own.
+        for option in (options or {}).values():
+            files = (option.get("files") or {}) if isinstance(option, dict) else {}
+            files = files if isinstance(files, dict) else {}
+            written.update({source_of(h): "/* option header */\n" for h in files.get("headers") or [] if source_of(h)})
+            written.update({source_of(s): "/* option source */\n" for s in files.get("sources") or [] if source_of(s)})
+
         written.update(extra_files or {})
 
         for relative, text in written.items():
@@ -79,6 +88,9 @@ def library(tmp_path):
         if install:
             data["install"] = install
 
+        if options:
+            data["options"] = options
+
         (root / "library.yml").write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
         return root
@@ -98,6 +110,18 @@ CPROJECT = (
     "\t\t<configuration name=\"Debug\">\n"
     "\t\t\t<toolChain>\n"
     "\t\t\t\t<tool>\n"
+    "\t\t\t\t\t<option id=\"as\" superClass=\"x.assembler.option.definedsymbols\""
+    " valueType=\"definedSymbols\">\n"
+    "\t\t\t\t\t\t<listOptionValue builtIn=\"false\" value=\"DEBUG\"/>\n"
+    "\t\t\t\t\t</option>\n"
+    "\t\t\t\t</tool>\n"
+    "\t\t\t\t<tool>\n"
+    "\t\t\t\t\t<option id=\"da\" superClass=\"x.c.compiler.option.definedsymbols\""
+    " valueType=\"definedSymbols\">\n"
+    "\t\t\t\t\t\t<listOptionValue builtIn=\"false\" value=\"DEBUG\"/>\n"
+    "\t\t\t\t\t\t<listOptionValue builtIn=\"false\" value=\"USE_HAL_DRIVER\"/>\n"
+    "\t\t\t\t\t\t<listOptionValue builtIn=\"false\" value=\"STM32G431xx\"/>\n"
+    "\t\t\t\t\t</option>\n"
     "\t\t\t\t\t<option id=\"a\" superClass=\"x.c.compiler.option.includepaths\""
     " valueType=\"includePath\">\n"
     "\t\t\t\t\t\t<listOptionValue builtIn=\"false\" value=\"../Core/Inc\"/>\n"
@@ -110,6 +134,11 @@ CPROJECT = (
     "\t\t<configuration name=\"Release\">\n"
     "\t\t\t<toolChain>\n"
     "\t\t\t\t<tool>\n"
+    "\t\t\t\t\t<option id=\"db\" superClass=\"x.c.compiler.option.definedsymbols\""
+    " valueType=\"definedSymbols\">\n"
+    "\t\t\t\t\t\t<listOptionValue builtIn=\"false\" value=\"USE_HAL_DRIVER\"/>\n"
+    "\t\t\t\t\t\t<listOptionValue builtIn=\"false\" value=\"STM32G431xx\"/>\n"
+    "\t\t\t\t\t</option>\n"
     "\t\t\t\t\t<option id=\"b\" superClass=\"x.c.compiler.option.includepaths\""
     " valueType=\"includePath\">\n"
     "\t\t\t\t\t\t<listOptionValue builtIn=\"false\" value=\"../Core/Inc\"/>\n"
@@ -134,9 +163,15 @@ UVPROJX = (
     "        <TargetArmAds>\n"
     "          <Cads>\n"
     "            <VariousControls>\n"
+    "              <Define>USE_HAL_DRIVER,STM32G431xx</Define>\n"
     "              <IncludePath>..\\Core\\Inc</IncludePath>\n"
     "            </VariousControls>\n"
     "          </Cads>\n"
+    "          <Aads>\n"
+    "            <VariousControls>\n"
+    "              <Define></Define>\n"
+    "            </VariousControls>\n"
+    "          </Aads>\n"
     "        </TargetArmAds>\n"
     "      </TargetOption>\n"
     "      <Groups>\n"
@@ -169,6 +204,11 @@ EWP = (
     "        <settings>\n"
     "            <name>ICCARM</name>\n"
     "            <data>\n"
+    "                <option>\n"
+    "                    <name>CCDefines</name>\n"
+    "                    <state>USE_HAL_DRIVER</state>\n"
+    "                    <state>STM32G431xx</state>\n"
+    "                </option>\n"
     "                <option>\n"
     "                    <name>CCIncludePath2</name>\n"
     "                    <state>$PROJ_DIR$/../Core/Inc</state>\n"

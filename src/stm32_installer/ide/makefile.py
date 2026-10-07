@@ -23,9 +23,11 @@ from .base import (
     MANUAL,
     Outcome,
     backup,
+    clash_steps,
     compiled_names,
     include_folders,
     line_ending,
+    plan_defines,
     read,
     relative,
     write,
@@ -198,12 +200,37 @@ def _follow(lines, name, dropped, wanted):
     return missing
 
 
-def integrate(makefile, library, destination, project_root, dropped=()):
+def _edit_defines(lines, wanted, dropped, newline):
     """
-    Add the library's sources and include folder to a CubeMX Makefile.
+    Bring C_DEFS in step with the library, where the -DUSE_HAL_DRIVER line is.
+
+    Returns the defines left alone because the list already sets the same name
+    to something else. lines is changed where it stands.
+    """
+    span = _span(lines, "C_DEFS")
+    present = {entry[2:].strip(): index for index, entry in _entries(lines, span) if entry.startswith("-D")}
+    remove, add, clashes = plan_defines(list(present), wanted, dropped)
+
+    # From the bottom up, so each line taken out leaves the indexes above it
+    # where they were. Never the NAME = line itself, which would end the list.
+    for define in sorted(remove, key=lambda d: present[d], reverse=True):
+        if present[define] != span[0]:
+            _drop(lines, span, present[define])
+            span = _span(lines, "C_DEFS")
+
+    if add:
+        _append(lines, span, [f"-D{define}" for define in add], newline)
+
+    return clashes
+
+
+def integrate(makefile, library, destination, project_root, dropped=(), dropped_defines=()):
+    """
+    Add the library's sources, include folder and defines to a CubeMX Makefile.
 
     dropped lists the library files an update has just removed, so their
-    entries can follow the file to its new place or go.
+    entries can follow the file to its new place or go. dropped_defines are
+    taken out of C_DEFS.
     """
     path = Path(makefile)
     # CubeMX writes every path relative to the project root, forward slashed.
@@ -256,8 +283,22 @@ def integrate(makefile, library, destination, project_root, dropped=()):
     if missing:
         _append(lines, _span(lines, "C_INCLUDES"), missing, newline)
 
-    updated = "".join(lines)
     steps = [f"Add {entry} to the build by hand. CubeMX's Makefile has no rule for it." for entry in other]
+
+    # Without C_DEFS the library would build, but with its defaults instead of
+    # the settings it reads through the define, and nothing would say so.
+    has_defs = _span(lines, "C_DEFS") is not None
+    unplaced = bool(library.defines) and not has_defs
+
+    if has_defs:
+        steps += clash_steps(_edit_defines(lines, library.defines, dropped_defines, newline), "the Makefile")
+    elif unplaced:
+        steps.append("Add to C_DEFS by hand: " + " ".join(f"-D{define}" for define in library.defines))
+
+    updated = "".join(lines)
+
+    if updated == text and unplaced:
+        return Outcome(NAME, MANUAL, f"The Makefile has {library.name}, but no C_DEFS to add to.", steps)
 
     if updated == text:
         return Outcome(NAME, ALREADY, f"The Makefile already has {library.name}.", steps)
@@ -269,11 +310,17 @@ def integrate(makefile, library, destination, project_root, dropped=()):
     except OSError as error:
         return Outcome(NAME, MANUAL, f"Could not write the Makefile: {error}", _manual_steps(folder), saved)
 
+    if unplaced:
+        return Outcome(NAME, MANUAL, f"Added {library.name} to the Makefile, but found no C_DEFS to add to.",
+                       steps + [RERUN], saved)
+
+    lists = "C_SOURCES, C_INCLUDES and C_DEFS" if library.defines else "C_SOURCES and C_INCLUDES"
+
     return Outcome(
         NAME,
         CHANGED,
         f"Updated {library.name} in the Makefile." if was_there
-        else f"Added {library.name} to C_SOURCES and C_INCLUDES in the Makefile.",
+        else f"Added {library.name} to {lists} in the Makefile.",
         steps=steps + [RERUN],
         backup=saved,
     )

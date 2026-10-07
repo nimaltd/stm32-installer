@@ -22,7 +22,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 
-from ..manifest import COMPILED
+from ..manifest import COMPILED, define_name
 
 # Wraps what this tool adds to a text file, so it can be found again.
 MARK_OPEN = "# >>> stm32-installer: {name} >>>"
@@ -222,6 +222,58 @@ def compiled_names(paths, destination):
             names.append(name)
 
     return names
+
+
+def plan_defines(present, wanted, dropped):
+    """
+    What to do to one list of defines in a project file.
+
+    Args:
+        present: the defines the list holds now, as written there.
+        wanted: what the library asks for.
+        dropped: what the last install of this library added and this one no
+            longer asks for.
+
+    Returns:
+        (remove, add, clashes). remove holds entries of present to take out,
+        only ever ones the library put there. add holds wanted defines the list
+        does not have. clashes holds (wanted, present) pairs where the list
+        already sets the same name to something else. Those are left alone: the
+        installer cannot tell a value the user chose on purpose from a stale
+        one, and changing the user's mind for them is worse than saying so.
+    """
+    present = [entry.strip() for entry in present]
+    remove = [entry for entry in present if entry in dropped and entry not in wanted]
+    left = [entry for entry in present if entry not in remove]
+    named = {define_name(entry): entry for entry in left}
+    add = []
+    clashes = []
+
+    for define in wanted:
+        if define in left:
+            continue
+
+        have = named.get(define_name(define))
+
+        if have is None:
+            add.append(define)
+        elif (define, have) not in clashes:
+            clashes.append((define, have))
+
+    return remove, add, clashes
+
+
+def clash_steps(clashes, where):
+    """Lines for the user about defines left as they were, one per name."""
+    steps = []
+
+    for define, have in clashes:
+        line = f"{define_name(define)} is already set as {have} in {where}, so it was left as it is. The library sets {define}."
+
+        if line not in steps:
+            steps.append(line)
+
+    return steps
 
 
 def insert_before(text, at):
