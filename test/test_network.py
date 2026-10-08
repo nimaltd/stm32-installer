@@ -102,8 +102,10 @@ def test_a_dropped_connection_is_tried_again_on_the_other_host(flaky, tmp_path):
     urllib.error.URLError("getaddrinfo failed"),
     "cut",
     _http(503),
-])
+], ids=["reset", "timeout", "no-address", "cut-short", "http-503"])
 def test_what_a_bad_link_does_is_tried_again(fault, flaky, tmp_path):
+    # Named by hand: on Python 3.8, an HTTPError with no body breaks when
+    # pytest looks for a name on it, and the whole file fails to load.
     flaky["faults"] = [fault]
 
     download.fetch("someone/demo", destination=tmp_path / "lib")
