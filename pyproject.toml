@@ -8,7 +8,7 @@ name = "stm32-installer"
 # Read from stm32_installer.__version__, so the version lives in exactly one
 # place and cannot drift between the package and its metadata.
 dynamic = ["version"]
-description = "Install NimaLTD embedded C libraries into an STM32 project"
+description = "Install embedded C libraries into an STM32 project"
 readme = "README.md"
 requires-python = ">=3.8"
 license = "Apache-2.0"
@@ -37,6 +37,9 @@ stm32-installer = "stm32_installer.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+# The core is a git submodule, the whole core-installer repository, and its own
+# tests are no part of the installer.
+exclude = ["stm32_installer.core.test", "stm32_installer.core.test.*"]
 
 [tool.setuptools.dynamic]
 version = { attr = "stm32_installer.__version__" }

@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from stm32_installer import cli, download, installer, manifest
+from stm32_installer.core import cli, download, installer, manifest
 
 LFS = {
     "description": "LittleFS file system on the flash",
@@ -102,7 +102,7 @@ def nobody(monkeypatch):
 
 
 def _record(root):
-    return json.loads((root / installer.RECORD_NAME).read_text(encoding="utf-8"))["libraries"]
+    return json.loads((root / ".stm32-installer.json").read_text(encoding="utf-8"))["libraries"]
 
 
 # ----------------------------------------------------------------------------
@@ -410,7 +410,7 @@ def test_a_library_brought_in_keeps_its_options_without_a_question(library, proj
     """The flags are for what was named, so one brought in only keeps its answer."""
     root = project(cmake=True)
     lib = manifest.load(_demo(library))
-    root.joinpath(installer.RECORD_NAME).write_text(
+    root.joinpath(".stm32-installer.json").write_text(
         json.dumps({"libraries": {"demo": {"folder": "demo", "options": {"lfs": True}}}}), encoding="utf-8"
     )
 

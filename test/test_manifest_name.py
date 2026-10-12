@@ -9,7 +9,7 @@ one is the manifest.
 
 import pytest
 
-from stm32_installer import download, installer, manifest
+from stm32_installer.core import download, installer, manifest
 
 from test_download import _ref_of, github  # noqa: F401  the fake GitHub fixture
 

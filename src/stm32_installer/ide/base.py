@@ -18,62 +18,16 @@ ending of the lines around it, rather than carrying a shape of its own.
 
 import os
 import re
-import shutil
-from datetime import datetime
 from pathlib import Path, PurePosixPath
 
-from ..manifest import COMPILED, define_name
+# Shared with the core: the outcomes it prints, and the copy taken before an edit.
+from ..core.files import backup  # noqa: F401
+from ..core.manifest import COMPILED, define_name
+from ..core.target import ALREADY, CHANGED, MANUAL, SKIPPED, Outcome  # noqa: F401
 
 # Wraps what this tool adds to a text file, so it can be found again.
 MARK_OPEN = "# >>> stm32-installer: {name} >>>"
 MARK_CLOSE = "# <<< stm32-installer: {name} <<<"
-
-CHANGED = "changed"
-ALREADY = "already"
-MANUAL = "manual"
-SKIPPED = "skipped"
-
-
-class Outcome:
-    """What an integration did, and what the user still has to do themselves."""
-
-    def __init__(self, ide, status, message, steps=None, backup=None):
-        self.ide = ide
-        self.status = status
-        self.message = message
-        self.steps = steps or []
-        self.backup = backup
-
-    @property
-    def needs_user(self):
-        return self.status == MANUAL
-
-    def __repr__(self):
-        return f"Outcome({self.ide}, {self.status})"
-
-
-def backup(path):
-    """
-    Copy a file aside before editing it.
-
-    Named with a timestamp rather than a plain .bak, so a second install does
-    not overwrite the copy taken before the first one.
-    """
-    path = Path(path)
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    target = path.with_suffix(path.suffix + f".{stamp}.bak")
-    count = 1
-
-    # A library and the one it needs are installed in one run, often inside
-    # the same second. The second copy must not replace the first, which is
-    # the only one holding the file as it was before either of them.
-    while target.exists():
-        count += 1
-        target = path.with_suffix(path.suffix + f".{stamp}-{count}.bak")
-
-    shutil.copyfile(path, target)
-
-    return target
 
 
 def include_folders(library, folder):

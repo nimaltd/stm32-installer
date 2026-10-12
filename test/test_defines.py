@@ -15,7 +15,8 @@ import re
 
 import pytest
 
-from stm32_installer import cli, download, ide, installer, manifest
+from stm32_installer import ide
+from stm32_installer.core import cli, download, installer, manifest
 from stm32_installer.ide import base, cmake, cubeide, iar, keil, makefile
 
 LFS = "LFS_DEFINES=lfs_defines.h"
@@ -570,7 +571,7 @@ def test_the_record_keeps_the_defines(library, tmp_path):
     root = tmp_path / "Proj"
 
     installer.install_to(lib, root / "demo", project_root=root)
-    record = json.loads((root / installer.RECORD_NAME).read_text(encoding="utf-8"))
+    record = json.loads((root / ".stm32-installer.json").read_text(encoding="utf-8"))
 
     assert record["libraries"]["demo"]["defines"] == [LFS]
 
@@ -592,7 +593,7 @@ def test_a_define_edited_into_the_record_is_never_used(library, tmp_path):
     lib = manifest.load(library(install={"defines": [LFS]}))
     installer.install_to(lib, root / "demo", project_root=root)
 
-    path = root / installer.RECORD_NAME
+    path = root / ".stm32-installer.json"
     record = json.loads(path.read_text(encoding="utf-8"))
     record["libraries"]["demo"]["defines"] = ['X"/><evil', 7, "OLD_ONE"]
     path.write_text(json.dumps(record), encoding="utf-8")

@@ -15,7 +15,7 @@ import urllib.error
 
 import pytest
 
-from stm32_installer import cli, download
+from stm32_installer.core import cli, download
 
 MANIFEST = b"name: demo\nfiles:\n  headers:\n    - demo.h\n  sources:\n    - demo.c\n"
 FILES = {"installer.yml": MANIFEST, "demo.h": b"/* h */\n", "demo.c": b"/* c */\n"}

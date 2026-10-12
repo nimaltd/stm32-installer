@@ -8,7 +8,7 @@ import os
 
 import pytest
 
-from stm32_installer import cli, installer, manifest, usercode
+from stm32_installer.core import cli, installer, manifest, usercode
 
 CONFIG_V1 = (
     "/* demo_config.h, version 1 */\n"
@@ -298,7 +298,7 @@ def test_without_a_fingerprint_in_the_record_code_is_replaced_as_before(library,
     v1 = _version(library, tmp_path, "v1", CONFIG_V1)
     _, destination = _install(v1, tmp_path)
 
-    record_path = tmp_path / "Proj" / installer.RECORD_NAME
+    record_path = tmp_path / "Proj" / ".stm32-installer.json"
     record = json.loads(record_path.read_text(encoding="utf-8"))
     del record["libraries"]["demo"]["fingerprints"]
     record_path.write_text(json.dumps(record), encoding="utf-8")

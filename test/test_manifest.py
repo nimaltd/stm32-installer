@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from stm32_installer import manifest
+from stm32_installer.core import manifest
 
 
 def test_reads_the_basics(library):

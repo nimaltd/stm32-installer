@@ -1,0 +1,3 @@
+[submodule "src/stm32_installer/core"]
+	path = src/stm32_installer/core
+	url = ../core-installer.git

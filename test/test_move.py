@@ -7,7 +7,7 @@ them behind in a .bak and gave the new file the defaults. They go with the
 file now, found by its name among the files the last install wrote.
 """
 
-from stm32_installer import cli, installer, manifest
+from stm32_installer.core import cli, installer, manifest
 
 CONFIG = (
     "#ifndef DEMO_CONFIG_H\n"

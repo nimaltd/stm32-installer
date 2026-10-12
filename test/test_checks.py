@@ -1,6 +1,7 @@
 """Tests for checking a project against what a library needs."""
 
-from stm32_installer import checks, manifest
+from stm32_installer import checks
+from stm32_installer.core import manifest
 
 HAL_CONF = (
     "#define HAL_MODULE_ENABLED\n"

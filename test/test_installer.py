@@ -2,7 +2,7 @@
 
 import json
 
-from stm32_installer import installer, manifest
+from stm32_installer.core import installer, manifest
 
 
 def test_code_and_config_land_in_the_folder(library, tmp_path):
@@ -125,7 +125,7 @@ def test_the_record_says_what_was_installed(library, tmp_path):
 
     installer.install_to(lib, project_root / "demo", project_root=project_root)
 
-    record = json.loads((project_root / installer.RECORD_NAME).read_text(encoding="utf-8"))
+    record = json.loads((project_root / ".stm32-installer.json").read_text(encoding="utf-8"))
     entry = record["libraries"]["demo"]
 
     assert entry["version"] == "1.0.0"
@@ -137,7 +137,7 @@ def test_a_damaged_record_does_not_break_an_install(library, tmp_path):
     lib = manifest.load(library())
     project_root = tmp_path / "Proj"
     project_root.mkdir()
-    (project_root / installer.RECORD_NAME).write_text("{ not json", encoding="utf-8")
+    (project_root / ".stm32-installer.json").write_text("{ not json", encoding="utf-8")
 
     installer.install_to(lib, project_root / "demo", project_root=project_root)
 
@@ -367,7 +367,7 @@ def test_an_update_never_deletes_outside_the_library_folder(library, tmp_path):
     main.write_text("int main(void) { return 0; }\n", encoding="utf-8")
 
     installer.install_to(old, project / "demo", project_root=project)
-    record_path = project / installer.RECORD_NAME
+    record_path = project / ".stm32-installer.json"
     record = json.loads(record_path.read_text(encoding="utf-8"))
     record["libraries"]["demo"]["files"].append("Core/Src/main.c")
     record_path.write_text(json.dumps(record), encoding="utf-8")

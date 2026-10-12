@@ -12,7 +12,7 @@ import zipfile
 
 import pytest
 
-from stm32_installer import cli, download, installer, manifest
+from stm32_installer.core import cli, download, installer, manifest
 
 
 def _zip(folder, archive, top):

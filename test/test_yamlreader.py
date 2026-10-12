@@ -9,7 +9,7 @@ reproduce.
 
 import pytest
 
-from stm32_installer import yamlreader
+from stm32_installer.core import yamlreader
 
 pyyaml = pytest.importorskip("yaml", reason="PyYAML is needed to compare the two readers")
 

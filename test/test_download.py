@@ -14,7 +14,7 @@ import urllib.request
 
 import pytest
 
-from stm32_installer import download
+from stm32_installer.core import download
 
 MANIFEST = b"name: demo\nfiles:\n  headers:\n    - demo.h\n  sources:\n    - demo.c\n"
 

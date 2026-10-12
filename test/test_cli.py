@@ -12,7 +12,8 @@ import zipfile
 
 import pytest
 
-from stm32_installer import __version__, cli, download
+from stm32_installer import __version__
+from stm32_installer.core import cli, download
 
 
 class _Stream:

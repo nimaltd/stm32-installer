@@ -1,10 +1,12 @@
 # stm32-installer
 
-Installs [NimaLTD](https://github.com/nimaltd) embedded C libraries into an STM32 project.
+Installs embedded C libraries into an STM32 project.
 
 Copying two files into a project is easy. Doing it so the build actually picks them up, without clobbering the settings you changed last month, is the part this handles.
 
-Every command below uses `example` as the library name. Put the real one in its place.
+It works with any library that has an `installer.yml` at the root of its repository. I wrote it for my own [NimaLTD](https://github.com/nimaltd) libraries, and they all have one, but nothing in it is tied to them: add an `installer.yml` to yours, as shown [below](#for-someone-writing-a-library), and it installs the same way.
+
+Every command below uses `owner/example`, the library's GitHub owner and name, such as `nimaltd/ee24`. Put the real ones in its place.
 
 ---
 
@@ -19,12 +21,12 @@ pip install stm32-installer
 Then, from the root of your STM32 project:
 
 ```bash
-stm32-installer nimaltd/example
+stm32-installer owner/example
 ```
 
 To update it later, `pip install --upgrade stm32-installer`. To remove it, `pip uninstall stm32-installer`.
 
-On Windows, if `stm32-installer` is not found after installing, pip put it in a folder that is not on your PATH. `python -m stm32_installer nimaltd/example` runs the same thing.
+On Windows, if `stm32-installer` is not found after installing, pip put it in a folder that is not on your PATH. `python -m stm32_installer owner/example` runs the same thing.
 
 On Linux or macOS, if pip refuses with `externally-managed-environment`, use `pipx install stm32-installer` instead, and `pipx upgrade stm32-installer` to update.
 
@@ -116,13 +118,13 @@ The argument can be any of these, and you can give several at once:
 
 | You have | You type |
 |---|---|
-| Nothing yet, and internet | `stm32-installer nimaltd/example` |
-| The library's GitHub address | `stm32-installer https://github.com/nimaltd/example` |
+| Nothing yet, and internet | `stm32-installer owner/example` |
+| The library's GitHub address | `stm32-installer https://github.com/owner/example` |
 | The zip from GitHub's **Download ZIP** | `stm32-installer D:/Downloads/example-main.zip` |
 | That zip unpacked, anywhere on disk | `stm32-installer D:/Downloads/example-main` |
 | The library's folder, already inside your project | `stm32-installer example` |
 
-A bare name like `example` means `nimaltd/example` on GitHub, unless a folder of that name exists where you run it, in which case the folder is used. A path that does not exist is reported as missing rather than looked up on GitHub, so a typo in `D:/Downloads/...` gets a straight answer.
+A bare name with no owner, like `example`, is a NimaLTD library, `nimaltd/example` on GitHub, unless a folder of that name exists where you run it, in which case the folder is used. A path that does not exist is reported as missing rather than looked up on GitHub, so a typo in `D:/Downloads/...` gets a straight answer.
 
 The zip does not need unpacking first. If you did unpack it with Windows' **Extract All**, which puts `example-main` inside another `example-main`, either folder works. A repository still on `master` gives `example-master`, which works the same.
 
@@ -141,9 +143,9 @@ The zip does not need unpacking first. If you did unpack it with Windows' **Extr
 `--ref` holds a project on one release, which is useful when you need exactly what you built with last time:
 
 ```bash
-stm32-installer nimaltd/example --ref v2.0.0         # a tag
-stm32-installer nimaltd/example --ref develop        # a branch
-stm32-installer nimaltd/example --ref 00949e695e16   # an exact commit
+stm32-installer owner/example --ref v2.0.0         # a tag
+stm32-installer owner/example --ref develop        # a branch
+stm32-installer owner/example --ref 00949e695e16   # an exact commit
 ```
 
 ### Where the files go
@@ -271,7 +273,7 @@ Project
 Done. #include "example.h" and you are away.
 ```
 
-The first line says where the library came from: `Fetching nimaltd/example ...` from GitHub, `Reading ...` from a zip or a folder.
+The first line says where the library came from: `Fetching owner/example ...` from GitHub, `Reading ...` from a zip or a folder.
 
 ---
 
@@ -329,70 +331,79 @@ It cannot switch a peripheral on for you. The `.ioc` belongs to CubeMX, and edit
 
 ## For someone writing a library
 
-Put an `installer.yml` at the root of the repository. Releases before 1.9.0 called it `library.yml`, and the installer still reads that name when there is no `installer.yml`, so a version pinned with `--ref` from before the rename installs as it always did. A library that renames its file says `requires.installer: 1.9.0`.
+Put an `installer.yml` at the root of the repository. Any library can have one, whoever wrote it. Releases before 1.9.0 called it `library.yml`, and the installer still reads that name when there is no `installer.yml`, so a version pinned with `--ref` from before the rename installs as it always did. A library that renames its file says `requires.installer: 1.9.0`.
+
+Every key the installer reads is below, each with what it does. Only `name` and `files` are required; leave out what your library does not need.
 
 ```yaml
-name: example
-description: What this library does, in one line
-repository: https://github.com/nimaltd/example
-license: Apache-2.0
+name: example                      # the library's name, and its folder in the project
+description: Driver for the X chip # one line, shown while installing
+repository: https://github.com/owner/example  # where it comes from
+license: Apache-2.0                # the licence's SPDX name
+version: 1.0.0                     # only when the first header has no @version tag
 
-kind: middleware        # driver, middleware, rtos, protocol, filesystem, utility, bsp
-category: system        # sensor, storage, display, communication, wireless,
-                        # rtos, timing, power, input, math, system
-
-provides: []            # what this gives other libraries. An RTOS says [rtos]
+kind: driver                       # driver, middleware, rtos, protocol, filesystem,
+                                   # utility or bsp
+category: sensor                   # sensor, storage, display, communication, wireless,
+                                   # rtos, timing, power, input, math or system
+provides: []                       # what it gives other libraries: [rtos] for an RTOS
 
 requires:
-  installer: 1.1.0      # the oldest stm32-installer that reads this file
-  libraries: []         # other libraries this one needs, like [osal >= 1.0.0]
-  hal: true
-  cmsis: true
-  rtos: none            # none, optional, any, freertos, cmsis-os2, threadx
-  hal_modules: [spi]    # must be enabled in stm32xxxx_hal_conf.h
-  peripherals:
-    - type: spi
-      count: 1
-      note: Master mode, 8 bit
-  c_standard: c11
+  installer: 1.9.0                 # the oldest stm32-installer that reads this file
+  libraries:                       # other libraries, installed first when missing
+    - osal >= 1.0.0                # no owner means nimaltd; >= the oldest that will do
+    - owner/lib                    # anyone else's, as owner/name
+  hal: true                        # uses the STM32 HAL
+  cmsis: false                     # uses CMSIS directly
+  rtos: optional                   # none, optional, any, freertos, cmsis-os2 or threadx
+  hal_modules: [spi]               # must be enabled in stm32xxxx_hal_conf.h, checked
+  peripherals:                     # must be set up in CubeMX, checked in the .ioc
+    - type: spi                    # the peripheral, as CubeMX names it
+      count: 1                     # how many the library needs
+      note: Master mode, 8 bit     # how to set it up, shown when it is missing
+  c_standard: c11                  # the C standard the code is written for
 
 install:
-  layout: mirror        # mirror keeps the repository's own folders, so the
-                        # code lands in src/ just as it sits here. flat (the
-                        # default) puts every file at the top of the folder.
-  defines:              # given to the whole project, beside USE_HAL_DRIVER
-    - EXAMPLE_FAST      # NAME, or NAME=value
+  layout: mirror                   # mirror keeps the repository's folders,
+                                   # flat (the default) puts every file at the top
+  include_dirs: [src]              # include folders, only when the guess is wrong
+  defines:                         # given to the whole project, beside USE_HAL_DRIVER
+    - EXAMPLE_FAST                 # NAME, or NAME=value
 
 files:
-  headers:
-    - src/example.h           # listed first: the one "#include" is printed for
-    - src/port/*.h            # a wildcard, matched the way a shell would
-  sources:
+  headers:                         # .h files; the first is the one to #include
+    - src/example.h
+    - src/example_config.h         # settings in USER CODE sections, kept on update
+    - src/port/*.h                 # a wildcard, matched the way a shell would
+  sources:                         # .c files, added to the build
     - src/example.c
-    - from: src/port/spi.c    # a file can say exactly where it goes, which
-      to: port/spi.c          # overrides the layout for that one file
+    - from: src/port/spi.c         # a file that goes somewhere of its own,
+      to: port/spi.c               # whatever the layout says
 
-options:                # parts the user chooses at install, see below
-  littlefs:
-    description: LittleFS file system on the flash
-    libraries:
+options:                           # parts the user chooses at install
+  littlefs:                        # the name typed after --with
+    description: LittleFS file system on the flash  # the question asked
+    libraries:                     # libraries this part needs, installed first
       - littlefs >= 2.11.0
-    files:
+    files:                         # its files, written like files above
       sources:
         - src/example_lfs.c
 
-once:                   # older libraries only: copied once, then the user's.
-  - from: src/example_port.c  # USER CODE sections, below, replace this
-    to: my_port.c             # "to" only when the name should change
+once:                              # older libraries only: copied when missing, then
+                                   # the user's. USER CODE sections replace this
+  - from: src/example_port.c       # the file in the repository
+    to: my_port.c                  # its name in the project, when it changes
 
-extras:                 # copied as they are, no compiling
-  - LICENSE.md          # LICENSE.md and NOTICE are the default, so this
-  - NOTICE              # section can be left out entirely
+extras:                            # copied as they are, never compiled
+  - LICENSE.md                     # LICENSE.md and NOTICE are the default,
+  - NOTICE                         # so leave this out if that is all
   - README.md
-  - docs                # a folder, copied whole and keeping its shape
+  - docs                           # a folder is copied whole
 ```
 
-There is no `version` in it. The installer reads the version from the `@version` tag in the file comment of the first header listed, so it is written in the code and nowhere else:
+The sections below say more about the keys that need it.
+
+Leave `version` out. The installer reads the version from the `@version` tag in the file comment of the first header listed, so it is written in the code and nowhere else:
 
 ```c
 /**
@@ -409,7 +420,7 @@ There is no `version` in it. The installer reads the version from the `@version`
 requires:
   installer: 1.5.0      # the first that installs them, rather than only naming them
   libraries:
-    - osal >= 1.0.0     # a NimaLTD library, from github.com/nimaltd/osal
+    - osal >= 1.0.0     # no owner means nimaltd: github.com/nimaltd/osal
     - someone/lib       # anyone else's, by owner and name
 ```
 
@@ -470,7 +481,7 @@ A file listed under `once` is copied only when it is missing, so the user's own 
 
 The key says what happens rather than what the file is. It is usually a configuration header, but the same rule fits a port layer someone fills in, or a table they tune: anything that is the library's to start and theirs from then on.
 
-One catch worth knowing: `#include "x.h"` searches the including file's own folder before any include path, so a config sitting beside the header that includes it will always win. That is fine when the library's tests use the same config, and it is why the tests in these libraries are written against `EXAMPLE_MAX_TASKS` rather than a fixed number.
+One catch worth knowing: `#include "x.h"` searches the including file's own folder before any include path, so a config sitting beside the header that includes it will always win. That is fine when the library's tests use the same config, and it is why the NimaLTD libraries test against a setting such as `EXAMPLE_MAX_TASKS` rather than a fixed number.
 
 The include path follows the layout on its own: `flat` gives the library folder, `mirror` gives wherever the headers landed. Add `install.include_dirs` only when that guess is wrong.
 
@@ -487,6 +498,14 @@ That is everything the repository needs. There is no installer script to copy in
 ---
 
 ## Running the tests
+
+The shared core, [core-installer](https://github.com/nimaltd/core-installer), is a git submodule in `src/stm32_installer/core`, so clone with it:
+
+```bash
+git clone --recursive https://github.com/nimaltd/stm32-installer.git
+```
+
+In a clone made without `--recursive`, `git submodule update --init` fetches it. Then:
 
 ```bash
 python test/run_tests.py

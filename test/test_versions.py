@@ -15,7 +15,7 @@ import zipfile
 import pytest
 
 import stm32_installer
-from stm32_installer import cli, console, download, manifest
+from stm32_installer.core import cli, console, download, manifest
 
 HEADER = "/**\n * @file        demo.h\n * @version     {version}\n */\n\n#ifndef DEMO_H\n"
 

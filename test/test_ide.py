@@ -5,7 +5,8 @@ from datetime import datetime
 
 import pytest
 
-from stm32_installer import ide, manifest
+from stm32_installer import ide
+from stm32_installer.core import files, manifest
 from stm32_installer.ide import base, cmake, cubeide, iar, keil, makefile
 
 
@@ -186,7 +187,7 @@ def test_two_backups_in_one_second_are_both_kept(tmp_path, monkeypatch):
         def now(cls, tz=None):
             return datetime(2026, 10, 1, 22, 4, 15)
 
-    monkeypatch.setattr(base, "datetime", Frozen)
+    monkeypatch.setattr(files, "datetime", Frozen)
     project_file = tmp_path / "CMakeLists.txt"
 
     project_file.write_text("before either\n", encoding="utf-8")
