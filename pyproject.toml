@@ -35,11 +35,13 @@ Issues = "https://github.com/nimaltd/stm32-installer/issues"
 [project.scripts]
 stm32-installer = "stm32_installer.cli:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
-# The core is a git submodule, the whole core-installer repository, and its own
-# tests are no part of the installer.
-exclude = ["stm32_installer.core.test", "stm32_installer.core.test.*"]
+# The package is the src folder itself, as in the C libraries, with no folder
+# of its name inside. The core is a git submodule, the whole core-installer
+# repository, and its own tests are no part of the installer, so they are not
+# listed.
+[tool.setuptools]
+package-dir = { "stm32_installer" = "src" }
+packages = ["stm32_installer", "stm32_installer.core", "stm32_installer.ide"]
 
 [tool.setuptools.dynamic]
 version = { attr = "stm32_installer.__version__" }

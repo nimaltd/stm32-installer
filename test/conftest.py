@@ -1,5 +1,6 @@
 """Shared fixtures: a throwaway library repository and a throwaway STM32 project."""
 
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -8,8 +9,15 @@ import yaml
 
 SRC = Path(__file__).resolve().parent.parent / "src"
 
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
+# The package is the src folder itself, so it is loaded under its own name
+# rather than found on sys.path, and before any test imports it.
+if "stm32_installer" not in sys.modules:
+    _spec = importlib.util.spec_from_file_location(
+        "stm32_installer", SRC / "__init__.py", submodule_search_locations=[str(SRC)]
+    )
+    _package = importlib.util.module_from_spec(_spec)
+    sys.modules["stm32_installer"] = _package
+    _spec.loader.exec_module(_package)
 
 
 @pytest.fixture

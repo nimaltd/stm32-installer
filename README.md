@@ -499,7 +499,7 @@ That is everything the repository needs. There is no installer script to copy in
 
 ## Running the tests
 
-The shared core, [core-installer](https://github.com/nimaltd/core-installer), is a git submodule in `src/stm32_installer/core`, so clone with it:
+The shared core, [core-installer](https://github.com/nimaltd/core-installer), is a git submodule in `src/core`, so clone with it:
 
 ```bash
 git clone --recursive https://github.com/nimaltd/stm32-installer.git
