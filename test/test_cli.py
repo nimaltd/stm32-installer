@@ -405,3 +405,12 @@ def test_an_update_to_a_src_layout_keeps_the_project_building(library, project, 
     assert not (root / "demo" / "demo.c").exists()
     assert "..\\demo\\src\\demo.c" in keil and "..\\demo\\demo.c" not in keil
     assert "demo/src/demo.c" in make and "demo/demo.c" not in make
+
+
+def test_nothing_to_install_says_how_rather_than_crashing(capsys):
+    """1.10.1 ended in an UnboundLocalError here, the first thing many people type."""
+    assert cli.main([]) == 2
+
+    err = capsys.readouterr().err
+    assert "stm32-installer owner/example" in err
+    assert "Traceback" not in err
