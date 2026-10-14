@@ -38,6 +38,7 @@ from .base import (
     plan_defines,
     read,
     relative,
+    under,
     write,
 )
 
@@ -376,3 +377,43 @@ def _define_steps(defines):
         "for every target:",
         "    " + ",".join(defines),
     ]
+
+
+def remove(uvprojx, library, project_root):
+    """Take the library's files, its group, include path and defines out of a Keil project."""
+    path = Path(uvprojx)
+    folder = relative(library.destination, path.parent)
+    text = read(path)
+
+    # Every file of the library's folder, in every target, wherever the user
+    # has moved its entry since.
+    updated = FILE_ELEMENT.sub(lambda m: "" if under(_entry_path(m.group(0)) or "", folder) else m.group(0), text)
+
+    # The group it leaves empty, when it still has the library's name. One the
+    # user renamed is theirs to remove.
+    updated = re.sub(
+        r"^[ \t]*<Group>\s*<GroupName>" + re.escape(library.name)
+        + r"</GroupName>\s*<Files>\s*</Files>\s*</Group>[ \t]*\r?\n",
+        "",
+        updated,
+        flags=re.MULTILINE,
+    )
+
+    def without_paths(match):
+        parts = match.group(2).split(";")
+        kept = [part for part in parts if not (part.strip() and under(part, folder))]
+        return match.group(1) + ";".join(kept) + match.group(3)
+
+    updated = INCLUDE_PATH.sub(without_paths, updated)
+    updated, _, _ = _edit_defines(updated, [], library.defines)
+
+    if updated == text:
+        return Outcome(NAME, ALREADY, f"{path.name} has nothing of {library.name}.")
+
+    saved = backup(path)
+    write(path, updated)
+
+    return Outcome(
+        NAME, CHANGED, f"Removed {library.name} from {path.name}.",
+        steps=["Close and reopen the project in uVision so it reloads the file list."], backup=saved,
+    )

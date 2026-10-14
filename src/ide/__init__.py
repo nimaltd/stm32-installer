@@ -15,7 +15,7 @@ from .base import ALREADY, CHANGED, MANUAL, SKIPPED, Outcome
 
 BACKENDS = (cmake, cubeide, keil, iar, makefile)
 
-__all__ = ["ALREADY", "CHANGED", "MANUAL", "SKIPPED", "Outcome", "detect", "integrate"]
+__all__ = ["ALREADY", "CHANGED", "MANUAL", "SKIPPED", "Outcome", "detect", "integrate", "uninstall"]
 
 
 def detect(project_root):
@@ -77,6 +77,33 @@ def integrate(project_root, library, destination, only=None, dropped=(), dropped
                     getattr(backend, "_manual_steps", lambda *_: [])(
                         str(destination.name if hasattr(destination, "name") else destination)
                     ),
+                )
+            )
+
+    return outcomes
+
+
+def uninstall(project_root, library):
+    """
+    Take a library out of every IDE project found, before its files go.
+
+    library is the core's Installed: its name, its folder, and the defines it
+    added, as the record remembers them. Returns a list of Outcome.
+    """
+    outcomes = []
+
+    for backend, path in detect(project_root):
+        try:
+            outcomes.append(backend.remove(path, library, project_root))
+        except Exception as error:
+            # As with an install, a project file this cannot edit is left for
+            # the user, and the files still go.
+            outcomes.append(
+                Outcome(
+                    backend.NAME,
+                    MANUAL,
+                    f"Could not update the project automatically: {error}",
+                    [f"Take {library.name} out by hand: its files, its include path and its defines."],
                 )
             )
 

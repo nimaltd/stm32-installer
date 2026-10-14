@@ -30,13 +30,17 @@ from .base import (
     plan_defines,
     read,
     relative,
+    under,
     write,
 )
 
 NAME = "Makefile"
 
-# The first line of a list, NAME = followed by whatever is on that line.
-LIST_START = r"^{name}[ \t]*=[^\r\n]*$"
+# The first line of a list, NAME = followed by whatever is on that line. A
+# file written on Windows ends its lines in CRLF, and $ stops only before the
+# line feed, so the carriage return is allowed for: without it a CubeMX
+# Makefile with CRLF was not recognised at all.
+LIST_START = r"^{name}[ \t]*=[^\r\n]*\r?$"
 
 # Which list each kind of file belongs in. CubeMX has no C++ rules, so a C++
 # file gets a manual step rather than a line the build would not know what to
@@ -332,3 +336,41 @@ def _manual_steps(folder):
         f"In the Makefile, add the .c files from {folder} to C_SOURCES,",
         f"and -I{folder} to C_INCLUDES.",
     ]
+
+
+def remove(makefile, library, project_root):
+    """Take the library's sources, include folders and defines out of a CubeMX Makefile."""
+    path = Path(makefile)
+    folder = relative(library.destination, path.parent)
+    text = read(path)
+    newline = line_ending(text)
+    lines = text.splitlines(keepends=True)
+
+    for name in sorted(set(LISTS.values())) + ["C_INCLUDES"]:
+        span = _span(lines, name)
+
+        if span is None:
+            continue
+
+        # From the bottom up, so each line taken out leaves the indexes above
+        # it where they were. Never the NAME = line itself, which would end
+        # the list.
+        for index, entry in reversed(_entries(lines, span)):
+            value = entry[2:] if name == "C_INCLUDES" and entry.startswith("-I") else entry
+
+            if index != span[0] and under(_key(value), folder):
+                _drop(lines, span, index)
+                span = _span(lines, name)
+
+    if _span(lines, "C_DEFS") is not None:
+        _edit_defines(lines, [], library.defines, newline)
+
+    updated = "".join(lines)
+
+    if updated == text:
+        return Outcome(NAME, ALREADY, f"The Makefile has nothing of {library.name}.")
+
+    saved = backup(path)
+    write(path, updated)
+
+    return Outcome(NAME, CHANGED, f"Removed {library.name} from the Makefile.", backup=saved)

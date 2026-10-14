@@ -82,3 +82,6 @@ class Stm32(Target):
                   dropped_defines=()):
         return ide.integrate(project_root, library, destination, only=only, dropped=dropped,
                              dropped_defines=dropped_defines)
+
+    def uninstall(self, project_root, library):
+        return ide.uninstall(project_root, library)

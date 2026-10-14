@@ -251,3 +251,19 @@ def insert_before(text, at):
     end = head - 1
 
     return end - 1 if end > 0 and text[end - 1] == "\r" else end
+
+
+def under(path, folder):
+    """
+    Whether a path, as a project file writes it, is folder or inside it.
+
+    Compared forward slashed and without a leading ./, so ..\\Libs\\ee24\\ee24.c
+    is under ../Libs/ee24 whichever slash the project writes.
+    """
+    def clean(text):
+        text = forward_slashes(str(text)).strip().rstrip("/")
+        return text[2:] if text.startswith("./") else text
+
+    path, folder = clean(path), clean(folder)
+
+    return path == folder or path.startswith(folder + "/")

@@ -30,6 +30,7 @@ from .base import (
     plan_defines,
     read,
     relative,
+    under,
     write,
 )
 
@@ -299,3 +300,45 @@ def _define_steps(defines):
         "MCU GCC Compiler, Preprocessor, and add to Define symbols, in every configuration:",
         "    " + " ".join(defines),
     ]
+
+
+def remove(cproject, library, project_root):
+    """Take the library's include paths, source folder and defines out of .cproject."""
+    path = Path(cproject)
+    folder = relative(library.destination, project_root)
+    text = read(path)
+    newline = line_ending(text)
+
+    # Every include path at the library's folder or under it, in every
+    # configuration, whatever its include_dirs were.
+    def without_paths(match):
+        body = re.sub(
+            r"\r?\n[ \t]*<listOptionValue\b[^>]*\bvalue=\"([^\"]*)\"[^>]*/>",
+            lambda value: "" if under(value.group(1), f"../{folder}") else value.group(0),
+            match.group(2),
+        )
+        return match.group(1) + body + match.group(3)
+
+    def without_source(match):
+        body = re.sub(
+            r"\r?\n[ \t]*<entry\b[^>]*/>",
+            lambda entry: "" if dict(ATTRIBUTE.findall(entry.group(0))).get("name") == folder
+            and dict(ATTRIBUTE.findall(entry.group(0))).get("kind") == "sourcePath" else entry.group(0),
+            match.group(2),
+        )
+        return match.group(1) + body + match.group(3)
+
+    updated = INCLUDE_OPTION.sub(without_paths, text)
+    updated = SOURCE_ENTRIES.sub(without_source, updated)
+    updated, _ = _edit_defines(updated, [], library.defines, newline)
+
+    if updated == text:
+        return Outcome(NAME, ALREADY, f".cproject has nothing of {library.name}.")
+
+    saved = backup(path)
+    write(path, updated)
+
+    return Outcome(
+        NAME, CHANGED, f"Removed {folder} from the include path, source folders and defines in .cproject.",
+        steps=["Refresh the project in CubeIDE (F5)."], backup=saved,
+    )

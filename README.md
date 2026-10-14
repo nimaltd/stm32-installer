@@ -38,6 +38,16 @@ Update it with:
     pip install --upgrade stm32-installer
 ```
 
+### Try it first
+
+There is a library made for trying the installer on, [stm32-installer-example](https://github.com/nimaltd/stm32-installer-example). It builds in any STM32 project CubeMX made, with nothing to set up, and blinks an LED without `HAL_Delay()`. Its README walks through an install, an update that keeps a setting you changed, an option, and an uninstall. From the root of your STM32 project:
+
+```bash
+stm32-installer nimaltd/stm32-installer-example
+```
+
+Its `installer.yml` has every key with a comment, so it is also a starting point for making your own library installable.
+
 ### On a bad connection
 
 A file that does not arrive is tried again, five times in all, 1, 2, 4 and 8 seconds apart. The tries take turns between `raw.githubusercontent.com` and `api.github.com`, two hosts on different addresses, so one that is filtered or failing does not stop the install. Every file of every library is fetched before anything is installed, so a run that fails part way leaves your project as it was: run it again.
@@ -85,32 +95,56 @@ Forget it, and the installer stops before writing anything, naming the zip it is
 
 ### A private repository
 
-Give the installer a GitHub token that can read the repository, in the `GITHUB_TOKEN` environment variable, and install by name as usual.
+A library in a private repository installs the same way, given a GitHub token that can read it. Make one once:
+
+1. Open [github.com/settings/personal-access-tokens](https://github.com/settings/personal-access-tokens) and click **Generate new token**.
+2. Give it a name and an expiry. Under **Resource owner**, pick the account or the organisation that owns the repository.
+3. Under **Repository access**, choose **Only select repositories** and pick the library's repository.
+4. Under **Permissions**, set **Contents** to **Read-only**:
+   - Older layout: open **Repository permissions** and change **Contents** from **No access** to **Read-only**.
+   - Newer layout: click **+ Add permissions**, tick **Contents**, then set its access to **Read-only**.
+
+   **Metadata** comes with it by itself. Contents is the one that matters: without it the token can see the repository but not read a file of it.
+5. Click **Generate token**, and copy it. GitHub shows it only once.
+
+Then give it with `--key`:
+
+```bash
+stm32-installer owner/example --key github_pat_...
+```
+
+Or put it in `GITHUB_TOKEN` once, and install by name as usual. That keeps it out of your shell's history, where `--key` leaves it:
 
 **Windows, PowerShell:**
 
 ```powershell
 $env:GITHUB_TOKEN = "github_pat_..."
-stm32-installer yourname/your-library
+stm32-installer owner/example
 ```
 
 **Windows, Command Prompt:**
 
 ```bat
 set GITHUB_TOKEN=github_pat_...
-stm32-installer yourname/your-library
+stm32-installer owner/example
 ```
 
 **Linux and macOS:**
 
 ```bash
 export GITHUB_TOKEN=github_pat_...
-stm32-installer yourname/your-library
+stm32-installer owner/example
 ```
 
-A fine-grained token is enough. On GitHub, under Settings, Developer settings, Personal access tokens, Fine-grained tokens, give it the repository and Contents read-only. If you use the `gh` command, `gh auth token` prints the token you are signed in with, and `GH_TOKEN` works as well as `GITHUB_TOKEN`.
+`--key` comes first when both are there. `GH_TOKEN` works as well, and if you use the `gh` command, `gh auth token` prints the token you are signed in with. Whichever way it comes, the token is sent to GitHub and nowhere else.
 
-The token is read from the environment only, never from the command line, where it would stay in your shell's history. It is sent to GitHub and nowhere else.
+When the token cannot read the library, the installer says which of these it is:
+
+- **It can see the repository, but cannot read its files.** The token has no Contents permission, only Metadata. Edit the token, and its value stays the same, so the command you ran keeps working: open the tokens page, click the token's name, click **Edit**, set Contents to **Read-only** as in step 4, and click **Update** at the bottom of the page. Then run the same command again.
+- **It cannot see the repository.** The repository is not in the token's Repository access. Edit the token as above and add it.
+- **GitHub did not accept the token.** It has expired, been revoked, or was copied with a character missing. Make a new one.
+
+A repository of an organisation can need one more step: an organisation that asks for fine-grained tokens to be approved shows the token nothing of its repositories until an owner of the organisation approves it, under its settings, **Personal access tokens**, **Pending requests**.
 
 ### What to install
 
@@ -138,6 +172,8 @@ The zip does not need unpacking first. If you did unpack it with Windows' **Extr
 | `--with littlefs` | Take this part of the library without being asked. Give it once for each part. See [Parts you choose](#parts-you-choose) |
 | `--without littlefs` | Leave this part out, or take it out of a library already installed |
 | `--ide cubeide` | Register with this IDE only: `cmake`, `cubeide`, `keil`, `iar` or `makefile`. Every one found, when not given |
+| `--key github_pat_...` | A GitHub token, for a library in a private repository. See [A private repository](#a-private-repository) |
+| `--uninstall example` | Take the library out of the project. See [Uninstalling a library](#uninstalling-a-library) |
 | `--version` | Show which version of the installer you have, and do nothing else |
 
 `--ref` holds a project on one release, which is useful when you need exactly what you built with last time:
@@ -223,6 +259,42 @@ Files
   removed example/example.h  no longer part of the library
   removed example/example.c  no longer part of the library
 ```
+
+### Uninstalling a library
+
+```bash
+stm32-installer --uninstall example
+```
+
+From your project's root, or with `--project`. It takes the library out of every IDE project the installer put it in: its block in `CMakeLists.txt` and the `CMakeLists.txt` in its folder, its include path, source folder and defines in STM32CubeIDE's `.cproject`, its group, include path and defines in Keil and IAR, and its lines in the Makefile. Then its files go:
+
+```
+example 2.0.0
+out of example
+
+Project
+  updated CMake  Removed example from CMakeLists.txt.
+  updated STM32CubeIDE  Removed example from the include path, source folders and defines in .cproject.
+
+Files
+  removed example/example.h
+  removed example/example.c
+  saved   example/example_config.h.20261014-163211.bak  it was yours to edit
+
+Done. example is out of the project.
+```
+
+What was yours is saved before it goes, as a `.bak` beside it: a configuration file the library created, and any file of the library you wrote in between its `USER CODE` lines or changed by hand. A file you put in the library's folder yourself is left where it is, and the folder with it. A define another installed library also asks for stays.
+
+A library another one needs stays, and the installer says which needs it:
+
+```
+Error: spif needs osal, so it stays. Uninstall spif first, or name them all on one line.
+```
+
+Name them all, in any order, and each goes after what needs it: `stm32-installer --uninstall osal spif`. When the library you took out brought another with it that nothing left in the project needs, the last line names it, with the command that takes it out too.
+
+Uninstall works from `.stm32-installer.json`, the record of what was installed and where. A library put in by hand, or a record that was deleted, leaves it nothing to go on. A library installed by a version before 1.11.0 comes out the same way, but its record does not say what it needed, so nothing is named at the end.
 
 ### A library that needs another
 
@@ -333,7 +405,7 @@ It cannot switch a peripheral on for you. The `.ioc` belongs to CubeMX, and edit
 
 Put an `installer.yml` at the root of the repository. Any library can have one, whoever wrote it. Releases before 1.9.0 called it `library.yml`, and the installer still reads that name when there is no `installer.yml`, so a version pinned with `--ref` from before the rename installs as it always did. A library that renames its file says `requires.installer: 1.9.0`.
 
-Every key the installer reads is below, each with what it does. Only `name` and `files` are required; leave out what your library does not need.
+Every key the installer reads is below, each with what it does. Only `name` and `files` are required; leave out what your library does not need. For a working one to copy, see [stm32-installer-example](https://github.com/nimaltd/stm32-installer-example).
 
 ```yaml
 name: example                      # the library's name, and its folder in the project

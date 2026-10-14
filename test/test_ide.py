@@ -985,6 +985,14 @@ def test_a_makefile_that_cubemx_did_not_write_is_left_alone(project):
 
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_a_cubemx_makefile_is_recognised_whatever_its_line_endings(newline, project):
+    """With CRLF it was not, and the library never reached the Makefile."""
+    root = project(makefile=True, newline=newline)
+
+    assert [backend for backend, _ in ide.detect(root)] == [makefile]
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
 def test_the_makefile_gets_the_sources_and_the_include_folder(newline, library, project):
     root = project(makefile=True, newline=newline)
     lib, destination = _install(library, root)

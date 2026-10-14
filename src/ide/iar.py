@@ -48,6 +48,7 @@ from .base import (
     plan_defines,
     read,
     relative,
+    under,
     write,
 )
 
@@ -451,3 +452,58 @@ def _define_steps(defines):
         "In IAR: Project, Options, C/C++ Compiler, Preprocessor, and add to",
         "Defined symbols, one per line, in every configuration:",
     ] + [f"    {define}" for define in defines]
+
+
+def _without(text, name, prefix):
+    """The text without the files under prefix, and without the group they leave empty."""
+    text = FILE_ELEMENT.sub(lambda m: "" if under(_entry_name(m.group(0)) or "", prefix) else m.group(0), text)
+
+    # Groups nest, so only the empty form is matched: the group the install
+    # added, with nothing left in it. One the user renamed is theirs.
+    return re.sub(
+        r"^[ \t]*<group>\s*<name>" + re.escape(name) + r"</name>\s*</group>[ \t]*\r?\n",
+        "",
+        text,
+        flags=re.MULTILINE,
+    )
+
+
+def remove(ewp, library, project_root):
+    """Take the library's files, its group, include path and defines out of an IAR project."""
+    path = Path(ewp)
+    prefix = f"$PROJ_DIR$/{relative(library.destination, path.parent)}"
+    text = read(path)
+    newline = line_ending(text)
+
+    def without_paths(match):
+        body = re.sub(
+            r"\r?\n[ \t]*<state>([^<]*)</state>",
+            lambda state: "" if under(state.group(1), prefix) else state.group(0),
+            match.group(2),
+        )
+        return match.group(1) + body + match.group(3)
+
+    updated = INCLUDE_OPTION.sub(without_paths, _without(text, library.name, prefix))
+    updated, _ = _edit_defines(updated, [], library.defines, newline)
+
+    if updated == text:
+        return Outcome(NAME, ALREADY, f"{path.name} has nothing of {library.name}.")
+
+    saved = backup(path)
+    write(path, updated)
+
+    # The .ewt beside it carries the same file tree for the analysis tools.
+    companion = path.with_suffix(".ewt")
+
+    if companion.is_file():
+        old = read(companion)
+        new = _without(old, library.name, prefix)
+
+        if new != old:
+            backup(companion)
+            write(companion, new)
+
+    return Outcome(
+        NAME, CHANGED, f"Removed {library.name} from {path.name}.",
+        steps=["Reopen the workspace in IAR so it reloads the file list."], backup=saved,
+    )
