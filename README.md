@@ -18,11 +18,13 @@ Install the installer once. This needs internet:
 pip install stm32-installer
 ```
 
-Then, from the root of your STM32 project:
+Then, from the root of your STM32 project, install a library by its GitHub owner and name. To see it work first, take [stm32-installer-example](https://github.com/nimaltd/stm32-installer-example), a library made for trying the installer on:
 
 ```bash
-stm32-installer owner/example
+stm32-installer nimaltd/stm32-installer-example
 ```
+
+It builds in any STM32 project CubeMX made, with nothing to set up, and blinks an LED without `HAL_Delay()`. Its README walks through an install, an update that keeps a setting you changed, an option, and an uninstall. Any other library goes in the same way, as `stm32-installer owner/example`.
 
 To update it later, `pip install --upgrade stm32-installer`. To remove it, `pip uninstall stm32-installer`.
 
@@ -37,16 +39,6 @@ Error: This library needs stm32-installer 1.2.0 or newer, and this one is 1.1.1.
 Update it with:
     pip install --upgrade stm32-installer
 ```
-
-### Try it first
-
-There is a library made for trying the installer on, [stm32-installer-example](https://github.com/nimaltd/stm32-installer-example). It builds in any STM32 project CubeMX made, with nothing to set up, and blinks an LED without `HAL_Delay()`. Its README walks through an install, an update that keeps a setting you changed, an option, and an uninstall. From the root of your STM32 project:
-
-```bash
-stm32-installer nimaltd/stm32-installer-example
-```
-
-Its `installer.yml` has every key with a comment, so it is also a starting point for making your own library installable.
 
 ### On a bad connection
 
