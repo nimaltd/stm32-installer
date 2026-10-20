@@ -222,7 +222,7 @@ stm32-installer owner/example@v2.0.0               # the same, for this library 
 
 **From GitHub, from a zip, or from a folder outside your project**, the files the library's `installer.yml` lists are copied into a folder of your project. Nothing else comes with them, so the library's tests never reach your build. The zip or folder you gave is left exactly as it was.
 
-**A folder already inside your project** becomes the library where it stands. The header and source move to its top, your config file is created, and everything that belongs to the repository rather than your firmware is removed from it, the test folder above all. `--dir` does not apply here, since the folder is already where it is going. Rename it first if you want it called something else.
+**A folder already inside your project** becomes the library where it stands. The files its `installer.yml` lists stay at their paths, or for a library from before 2.1.0 with the `flat` layout move to its top, your config file is created, and everything that belongs to the repository rather than your firmware is removed from it, the test folder above all. `--dir` does not apply here, since the folder is already where it is going. Rename it first if you want it called something else.
 
 ### The folder question
 
@@ -260,7 +260,7 @@ A library can bring files that belong to your project rather than to the library
 
 ```
 Files
-  written example/example.h
+  written example/src/example.h
   created Core/Src/example_port.c  yours from now on
 ```
 
@@ -273,7 +273,7 @@ A library can need something made that no file can carry, such as a key made fre
 ```
 Run
   make-key     Make the product's key, product.key
-               python scripts/make_key.py product.key
+               python tools/make_key.py product.key
                Run it? [Y/n]:
 ```
 
@@ -468,7 +468,7 @@ It cannot switch a peripheral on for you. The `.ioc` belongs to CubeMX, and edit
 
 Put an `installer.yml` at the root of the repository. Any library can have one, whoever wrote it, and the one file serves stm32-installer and the other installers alike: each reads its own keys and leaves the others' alone. Releases before 1.9.0 called it `library.yml`, and the installer still reads that name when there is no `installer.yml`, so a version pinned with `--ref` from before the rename installs as it always did. A library that renames its file says `requires.installer: 1.9.0`.
 
-Every key the installer reads is below, each with what it does. Only `name` and `files` are required; leave out what your library does not need. For a working one to copy, see [stm32-installer-example](https://github.com/nimaltd/stm32-installer-example).
+Every key the installer reads is below, each with what it does, as a manifest asking for 2.1.0 writes it. Only `name` and its `headers` or `sources` are required; leave out what your library does not need. What changed in 2.1.0, and how a manifest from before reads, is under [Paths, from 2.1.0](#paths-from-210). For a working one to copy, see [stm32-installer-example](https://github.com/nimaltd/stm32-installer-example).
 
 ```yaml
 name: example                      # the library's name, and its folder in the project
@@ -484,7 +484,7 @@ category: sensor                   # sensor, storage, display, communication, wi
 provides: []                       # what it gives other libraries: [rtos] for an RTOS
 
 requires:
-  stm32_installer: 2.0.0           # the oldest stm32-installer that reads this file
+  stm32_installer: 2.1.0           # the oldest stm32-installer that reads this file
   libraries:                       # other libraries, installed first when missing
     - osal >= 1.0.0                # no owner means nimaltd; >= the oldest that will do
     - owner/lib                    # anyone else's, as owner/name
@@ -503,48 +503,49 @@ requires:
   c_standard: c11                  # the C standard the code is written for
 
 install:
-  layout: mirror                   # mirror keeps the repository's folders,
-                                   # flat (the default) puts every file at the top
   include_dirs: [src]              # include folders, only when the guess is wrong
   defines:                         # given to the whole project, beside USE_HAL_DRIVER
     - EXAMPLE_FAST                 # NAME, or NAME=value
 
-files:
-  headers:                         # .h files; the first is the one to #include
-    - src/example.h
-    - src/example_config.h         # settings in USER CODE sections, kept on update
-    - src/port/*.h                 # a wildcard, matched the way a shell would
-  sources:                         # .c files, added to the build
-    - src/example.c
-    - from: src/port/spi.c         # a file that goes somewhere of its own,
-      to: port/spi.c               # whatever the layout says
+headers:                           # .h files; the first is the one to #include
+  - src/example.h                  # every file keeps its path: example/src/example.h
+  - src/example_config.h           # settings in USER CODE sections, kept on update
+  - src/port/*.h                   # a wildcard, matched the way a shell would:
+                                   # * inside one folder, ** across any number of them
+sources:                           # .c files, added to the build
+  - src/example.c
+  - from: src/port/spi.c           # a file that goes somewhere of its own,
+    to: port/spi.c                 # in the library's folder
 
 options:                           # parts the user chooses at install
   littlefs:                        # the name typed after --with
     description: LittleFS file system on the flash  # the question asked
     libraries:                     # libraries this part needs, installed first
       - littlefs >= 2.11.0
-    files:                         # its files, written like files above
-      sources:
-        - src/example_lfs.c
+    sources:                       # its files, written like headers and sources above
+      - src/example_lfs.c
 
 once:                              # the project's own files: made when missing,
                                    # then the user's, never replaced or removed
+  - Core/Inc/example_conf.h        # 2.1.0: a path alone lands at that path in the project
   - from: templates/example_port.c # the file in the repository, to the project's folder
-    to: Core/Src/example_port.c    # its place in the project, when not its name
+    to: Core/Src/example_port.c    # to: another place in the project
 
 run:                               # steps run once the files are in, each asked about first
   - label: make-key                # the name typed after --run
     description: Make the product's key, product.key  # shown with the question
-    script: scripts/make_key.py    # Python, run with the installer's own Python,
+    script: tools/make_key.py      # Python, run with the installer's own Python, from the
+                                   # project's folder, or {library}/... in the library's
     args: [product.key]            # or command: [program, arguments], with no shell
     unless: product.key            # skipped when this file is in the project already
 
 extras:                            # copied as they are, never compiled
   - LICENSE.md                     # LICENSE.md and NOTICE are the default,
   - NOTICE                         # so leave this out if that is all
-  - README.md
+  - README.md                      # in the library's folder
   - docs                           # a folder is copied whole
+  - root: tools                    # 2.1.0: tools/ into the project's folder instead, as
+                                   # the library's own, written again on every install
 ```
 
 The sections below say more about the keys that need it.
@@ -563,6 +564,37 @@ Leave `version` out. The installer reads the version from the `@version` tag in 
 Before 2.0.0 the key was `requires.installer`, and it still works. It is named after the installer now, as every other installer's key is, so a reader of the file knows which installer it is for. One thing to know: an installer older than 2.0.0 reads only `requires.installer`, so a library that has to stop those older ones writes `installer: 2.0.0`, instead of the new key or as well.
 
 A library that uses anything 2.0.0 brings asks for 2.0.0: `once` files in the project's folder, `run`, or a library it needs given with an `@` or a `manifest`. The version also decides where `once` files go, as [below](#once).
+
+### Paths, from 2.1.0
+
+A manifest asking for `requires.stm32_installer: 2.1.0` has one rule for every path that names a place in the project's folder: it starts at the project's folder. `{library}` at its start names the library's own folder instead, wherever `--dir` put it. A path that names a file of the library, under `headers`, `sources`, `extras` or `once`, or as a `from`, is a path in the repository, as always.
+
+And every file is copied to the path it has, unchanged, unless a `to` says otherwise, so a path alone is all an entry needs: `src/example.c` lands at `src/example.c` in the library's folder, so `install.layout` is gone, `flat` is refused and `mirror` says nothing new. A `once` file lands at its own path in the project's folder: `- Core/Inc/example_conf.h` at `Core/Inc/example_conf.h`, where before 2.1.0 it was written `- from: Core/Inc/example_conf.h` and took only its name. And `headers` and `sources` need no `files` around them; `files` still reads, but not both at once.
+
+A `to` gives a file another place, where its list puts files. Under `headers`, `sources` and `extras` that is the library's folder, so `- from: src/example.h, to: example.h` lands at the top of it, and the include path follows. Under `once` it is the project's folder, where every `once` file lands. A `root` puts an extra in the project's folder instead of the library's: `- root: tools` takes the library's `tools/` to the project's `tools/`. Code has no `root`, since it is built in the library's folder, and a `once` file needs none. Wherever a `from` would be the same path as its `to` or `root`, leave it out: `- root: tools` is `- from: tools, root: tools`.
+
+| Key | Starts at |
+|---|---|
+| `headers`, `sources`, `extras`, `once`, `from` | the library's repository |
+| `to` under `headers`, `sources` and `extras` | the library's folder |
+| `once.to`, `extras.root` | the project's folder |
+| `run.script`, `run.unless` | the project's folder, or the library's with `{library}/` |
+| `{library}` in `run.args` and `run.command` | the library's folder, as the step names it from the project's folder |
+
+An extra with a `root` lands in the project's folder, as the library's own: a file at `root` itself, the files of a folder under it with their path below it, those a wildcard matches under it with their names; an extra's `to` places them the same way in the library's folder. It is written again on every install, a file of it the new version no longer ships is removed, and an uninstall takes it out. A file already there that the installer did not put there is the user's, and is never written over: the install stops and says so.
+
+In every manifest, a wildcard matches the whole path, the way a shell does, and the same whether the library comes from GitHub or a folder: `*` and `?` stay inside one folder, `**` crosses any number of them, none included, and `[ab]` is one of a set. So `*.c` is the `.c` files at the top, `src/*.c` those in `src`, and `src/**/*.c` every one below `src`, however deep. And two files of the code that would land in one place, such as two `util.c` that `flat` put side by side, are refused when the manifest is read, where the second used to replace the first without a word.
+
+```yaml
+extras:
+  - root: tools                    # tools/keygen.py and tools/keygen.md, into the project's folder
+run:
+  - label: signing-key
+    script: tools/keygen.py        # from the project's folder
+    unless: sign_key.pem
+```
+
+A step's script has to be one the install puts in place, an extra with a `root` or a `once` file, or with `{library}`, a file of the library's folder; anything else is refused when the manifest is read. A manifest asking for less than 2.1.0 keeps the meaning it was written for: its script is found in the library as it was fetched, and `{library}` is left as it is written.
 
 `requires.libraries` lists the libraries yours needs, each as its name, or its name with the oldest version that will do:
 
@@ -602,11 +634,10 @@ options:
     description: LittleFS file system on the flash
     libraries:
       - littlefs >= 2.11.0          # installed first, like requires.libraries
-    files:
-      headers:
-        - src/spif_lfs.h
-      sources:
-        - src/spif_lfs.c
+    headers:                        # under files: before 2.1.0
+      - src/spif_lfs.h
+    sources:
+      - src/spif_lfs.c
 ```
 
 The `description` is the question, so write it as what the part is. The name is lower case letters, digits, `_` and `-`, since people type it.
@@ -641,7 +672,7 @@ once:
     to: Core/Src/example_port.c        # its place from the project's folder
 ```
 
-`from` is a file of the library's repository, and `to` its place from the project's folder, its own name when left out. The file is the project's own, so the installer adds it to no IDE project. STM32CubeIDE builds every file in its source folders, such as CubeMX's `Core/Src`, and has `Core/Inc` on its include path; a CMake, Keil or IAR project lists its files one by one, and the user adds it there. Say so in your README.
+`from` is a file of the library's repository, and `to` its place from the project's folder. From 2.1.0 a path alone will do, `- Core/Src/example_port.c`, landing at that same path, and a `to` is only needed for another place; before, each entry is a mapping with a `from`, and a `to` left out meant its own name, at the top. A `once` file has no `root`: it always lands in the project's folder. The file is the project's own, so the installer adds it to no IDE project. STM32CubeIDE builds every file in its source folders, such as CubeMX's `Core/Src`, and has `Core/Inc` on its include path; a CMake, Keil or IAR project lists its files one by one, and the user adds it there. Say so in your README.
 
 Each is checked before anything is written. `to` stays inside the project, names none of the files the installer manages or CubeMX writes, `CMakeLists.txt`, `.cproject`, `.project`, the Keil and IAR projects, the Makefile, the `.ioc`, `stm32xxxx_hal_conf.h` and the record, and does not point into the library's own folder, which every install replaces. Two entries with one `to` are refused. And `from`, like every file a manifest names, stays inside the library: no `..`, no absolute path, no link leading out of it.
 
@@ -660,17 +691,19 @@ The include path follows the layout on its own: `flat` gives the library folder,
 Something no file can carry, such as a key made fresh for each product, is made by a step under `run`. It runs once the library's files are in, in the project's folder:
 
 ```yaml
+extras:
+  - root: tools                        # tools/make_key.py, into the project's folder
 run:
   - label: make-key
     description: Make the product's key, product.key
-    script: scripts/make_key.py
+    script: tools/make_key.py          # the project's tools/make_key.py
     args: [product.key]
     unless: product.key
 ```
 
 - `label` names the step, typed after `--run`, in lower case letters, digits, `_` and `-`.
 - `description` is shown with the question.
-- `script` is a Python file of the library, run with the installer's own Python, so it works on every computer the installer does. Or `command`, a program and its arguments as a list, `[openssl, rand, -out, product.key, "32"]`, run as it is, with no shell. One of the two, never both.
+- `script` is a Python file, run with the installer's own Python, so it works on every computer the installer does. From 2.1.0 it is a path from the project's folder, where an extra with a `root` or a `once` file put it, or `{library}/...` in the library's folder, see [Paths, from 2.1.0](#paths-from-210); before, it is a file of the library's repository. Or `command`, a program and its arguments as a list, `[openssl, rand, -out, product.key, "32"]`, run as it is, with no shell. One of the two, never both.
 - `args` are added after either.
 - `unless` names a file the step makes, from the project's folder. When it is there, the step is skipped without a question.
 
@@ -680,7 +713,7 @@ The user is always asked, and is shown exactly what will run. Nothing in the man
 
 ### Easy to get wrong
 
-**A `.c` file is built only when it is listed.** A port layer under `files.sources` is built like any other source. One under `once`, for a manifest asking for 2.0.0, is the project's and is added to no IDE project, so a port layer every user needs belongs in `files`, with its settings in USER CODE sections. Getting this wrong fails at link time with undefined references and no clue why.
+**A `.c` file is built only when it is listed.** A port layer under `sources` is built like any other source. One under `once`, for a manifest asking for 2.0.0, is the project's and is added to no IDE project, so a port layer every user needs belongs in `files`, with its settings in USER CODE sections. Getting this wrong fails at link time with undefined references and no clue why.
 
 **`kind: rtos` implies `provides: [rtos]`.** A library that is an operating system satisfies another library's RTOS requirement, whether or not you remembered to write it down.
 

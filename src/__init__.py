@@ -10,7 +10,7 @@ github.com/nimaltd/core-installer. What an STM32 project is, is in stm32.py.
 See https://github.com/nimaltd/stm32-installer
 """
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 # Before anything of the core is used: it asks the platform for every answer
 # that depends on the kind of project.
