@@ -55,9 +55,22 @@ def github(monkeypatch):
         seen=[],
         status=None,
         branches=None,
+        commits={},
+        lookups=[],
     )
 
     def fake_open(request, timeout=None):
+        # Which commit a ref is now, kept apart from the files: answered from
+        # commits, and 404 for a ref it does not hold, as GitHub does.
+        if "/commits/" in request.full_url:
+            state.lookups.append((request.full_url, dict(request.header_items())))
+            ref = urllib.parse.unquote(request.full_url.split("/commits/")[1])
+
+            if state.status is None and ref in state.commits:
+                return _Response(state.commits[ref].encode("ascii"))
+
+            raise urllib.error.HTTPError(request.full_url, state.status or 404, "Not Found", {}, None)
+
         state.seen.append((request.full_url, dict(request.header_items())))
 
         if state.status is not None:
@@ -85,7 +98,7 @@ def test_without_a_token_nothing_rides_along(github, tmp_path):
     download.fetch("someone/demo", destination=tmp_path / "lib")
 
     assert github.seen, "nothing was fetched"
-    assert all(url.startswith("https://raw.githubusercontent.com/someone/demo/main/") for url, _ in github.seen)
+    assert all(url.startswith("https://raw.githubusercontent.com/someone/demo/HEAD/") for url, _ in github.seen)
     assert all("Authorization" not in headers for _, headers in github.seen)
     assert (tmp_path / "lib" / "demo.c").read_bytes() == b"/* c */\n"
 
@@ -195,29 +208,40 @@ def test_a_branch_with_a_slash_stays_one_ref(github, monkeypatch, tmp_path):
 
 
 # ----------------------------------------------------------------------------
-# With no ref, main and then master
+# With no ref, the default branch, pinned to the commit it is
+# ----------------------------------------------------------------------------
+
+SHA = "3f2a9c1" + "0" * 33
 
 
-def test_no_ref_takes_main_and_never_asks_master(github, tmp_path):
-    github.branches = {"main", "master"}
+def test_no_ref_takes_the_default_branch_whatever_its_name(github, tmp_path):
+    """HEAD is git's name for it: main, master or develop, the one GitHub marks default."""
+    download.fetch("someone/demo", destination=tmp_path / "lib")
+
+    assert {_ref_of(url) for url, _ in github.seen} == {"HEAD"}
+    assert download.origin(tmp_path / "lib") == {
+        "kind": "github", "source": "someone/demo", "ref": None, "commit": None, "manifest": None,
+    }
+
+
+def test_every_file_comes_from_the_commit_the_ref_was(github, tmp_path):
+    """A push half way through a download cannot mix two versions."""
+    github.commits = {"HEAD": SHA}
 
     download.fetch("someone/demo", destination=tmp_path / "lib")
 
-    assert {_ref_of(url) for url, _ in github.seen} == {"main"}
+    assert {_ref_of(url) for url, _ in github.seen} == {SHA}
+    assert download.origin(tmp_path / "lib")["commit"] == SHA
+    assert github.lookups[0][1].get("Accept") == "application/vnd.github.sha"
 
 
-def test_no_ref_falls_back_to_master_for_every_file(github, tmp_path):
-    """Found on master, so the files come from master too, not from a main that is not there."""
-    github.branches = {"master"}
+def test_a_tag_is_pinned_the_same_way(github, tmp_path):
+    github.commits = {"v1.2.0": SHA}
 
-    download.fetch("someone/demo", destination=tmp_path / "lib")
+    download.fetch("someone/demo@v1.2.0", destination=tmp_path / "lib")
 
-    refs = [_ref_of(url) for url, _ in github.seen]
-
-    # main is asked for installer.yml, then for library.yml, its old name.
-    assert refs[:2] == ["main", "main"]
-    assert set(refs[2:]) == {"master"}
-    assert (tmp_path / "lib" / "demo.c").read_bytes() == b"/* c */\n"
+    assert {_ref_of(url) for url, _ in github.seen} == {SHA}
+    assert download.origin(tmp_path / "lib")["ref"] == "v1.2.0"
 
 
 def test_a_ref_given_is_the_only_one_asked(github, tmp_path):
@@ -229,8 +253,8 @@ def test_a_ref_given_is_the_only_one_asked(github, tmp_path):
     assert {_ref_of(url) for url, _ in github.seen} == {"master"}
 
 
-def test_only_a_404_moves_on_to_master(github, monkeypatch, tmp_path):
-    """A refused token would be refused on master too, and must be reported as itself."""
+def test_a_refusal_is_reported_as_itself(github, monkeypatch, tmp_path):
+    """A refused token is refused for library.yml as well, and must be said as it is."""
     monkeypatch.setenv("GITHUB_TOKEN", "t0ken")
     github.status = 403
 
@@ -241,11 +265,68 @@ def test_only_a_404_moves_on_to_master(github, monkeypatch, tmp_path):
     assert "HTTP 403" in str(raised.value)
 
 
-def test_neither_branch_names_both(github, tmp_path):
+def test_a_missing_manifest_names_the_default_branch(github, tmp_path):
     github.branches = {"develop"}
 
     with pytest.raises(download.DownloadError) as raised:
         download.fetch("someone/demo", destination=tmp_path / "lib")
 
-    assert "main or master" in str(raised.value)
+    assert "on its default branch" in str(raised.value)
     assert "GITHUB_TOKEN" in str(raised.value)
+
+
+@pytest.mark.parametrize("source, ref", [
+    ("someone/demo@v1.2.0", "v1.2.0"),
+    ("someone/demo@feature/x", "feature/x"),
+    ("demo@3f2a9c1", "3f2a9c1"),
+    ("https://github.com/someone/demo/tree/v1.2.0", "v1.2.0"),
+    ("https://github.com/someone/demo", None),
+])
+def test_a_ref_after_an_at_or_in_a_tree_address_is_the_ref(source, ref):
+    assert download._split_ref(source)[2] == ref
+
+
+def test_two_refs_for_one_library_are_refused(github, tmp_path):
+    with pytest.raises(download.DownloadError, match="Give the ref once"):
+        download.fetch("someone/demo@v1.0.0", ref="v2.0.0", destination=tmp_path / "lib")
+
+
+@pytest.mark.parametrize("source", ["someone/demo@", "someone/demo@../x", "someone/demo@-rf"])
+def test_a_ref_that_is_no_ref_is_refused(github, source, tmp_path):
+    with pytest.raises(download.DownloadError, match="after the @"):
+        download.fetch(source, destination=tmp_path / "lib")
+
+    assert github.seen == [] and github.lookups == []
+
+
+@pytest.mark.parametrize("entry", ["../evil.h", "..\\evil.h", "/etc/passwd", "C:/x.h"])
+def test_a_listed_file_outside_the_library_is_never_fetched(github, entry, tmp_path):
+    """Each file is written by its own path, so this one would land outside the download."""
+    text = "name: demo\nfiles:\n  headers:\n    - demo.h\n  sources:\n    - '%s'\n" % entry
+    github.files["installer.yml"] = text.encode("utf-8")
+
+    with pytest.raises(download.DownloadError, match="never fetched"):
+        download.fetch("someone/demo", destination=tmp_path / "lib")
+
+    assert [url for url, _ in github.seen if not url.endswith("/installer.yml")] == []
+
+
+def test_a_carried_manifest_stands_in_for_one_the_repository_lacks(github, tmp_path):
+    """littlefs as its authors ship it, with an installer.yml spif carries for it."""
+    del github.files["installer.yml"]
+
+    download.fetch("littlefs-project/littlefs", destination=tmp_path / "lib", carried=MANIFEST)
+
+    assert (tmp_path / "lib" / "installer.yml").read_bytes() == MANIFEST
+    assert (tmp_path / "lib" / "demo.c").read_bytes() == b"/* c */\n"
+    assert download.origin(tmp_path / "lib")["manifest"] == "carried"
+
+
+def test_an_answer_that_is_no_commit_is_not_used(github, tmp_path):
+    """A proxy's error page, say, where a SHA should be: the ref itself is used."""
+    github.commits = {"HEAD": "<html>not a commit</html>"}
+
+    download.fetch("someone/demo", destination=tmp_path / "lib")
+
+    assert {_ref_of(url) for url, _ in github.seen} == {"HEAD"}
+    assert download.origin(tmp_path / "lib")["commit"] is None

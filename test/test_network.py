@@ -49,11 +49,18 @@ def flaky(monkeypatch):
     runs out, every request is answered well. requests records (host, file,
     Accept) for each, and sleeps each wait.
     """
-    state = {"faults": [], "requests": [], "sleeps": []}
+    state = {"faults": [], "requests": [], "sleeps": [], "lookups": []}
 
     def fake_open(request, timeout=None):
         url = request.full_url.split("?")[0]
         host = url.split("/")[2]
+
+        # Which commit a ref is: unknown here, as with a limit on requests, so
+        # the files come from the ref itself. Kept apart from the faults.
+        if "/commits/" in url:
+            state["lookups"].append(url)
+            raise urllib.error.HTTPError(request.full_url, 404, "Not Found", {}, None)
+
         state["requests"].append((host, url.rsplit("/", 1)[1], request.get_header("Accept")))
         fault = state["faults"].pop(0) if state["faults"] else None
 
@@ -160,7 +167,7 @@ def test_a_404_is_not_tried_again(flaky, tmp_path):
         FILES["installer.yml"] = MANIFEST
 
     assert flaky["sleeps"] == []
-    assert [name for _, name, _ in flaky["requests"]] == ["installer.yml", "library.yml"] * 2
+    assert [name for _, name, _ in flaky["requests"]] == ["installer.yml", "library.yml"]
 
 
 def test_the_command_line_says_it_rather_than_a_traceback(flaky, library, project, capsys):

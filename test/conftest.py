@@ -1,6 +1,7 @@
 """Shared fixtures: a throwaway library repository and a throwaway STM32 project."""
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 
@@ -18,6 +19,10 @@ if "stm32_installer" not in sys.modules:
     _package = importlib.util.module_from_spec(_spec)
     sys.modules["stm32_installer"] = _package
     _spec.loader.exec_module(_package)
+
+
+# No test asks PyPI whether a newer installer is out.
+os.environ["INSTALLER_NO_UPDATE_CHECK"] = "1"
 
 
 @pytest.fixture

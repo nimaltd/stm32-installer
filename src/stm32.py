@@ -45,6 +45,10 @@ class Stm32(Target):
     name = "stm32-installer"
     record_name = ".stm32-installer.json"
     project = "STM32 project"
+    # stm32_installer, like the other four of the family. installer, the name
+    # it had first, is still read, so every manifest written for it still is.
+    requires_key = "stm32_installer"
+    requires_aliases = ("installer",)
     integrations = ("cmake", "cubeide", "keil", "iar", "makefile")
     no_project = "No IDE project was recognised here, so nothing was registered."
     no_project_hint = "Add the folder to your include paths and the .c files to your build."
@@ -74,6 +78,15 @@ class Stm32(Target):
             return []
 
         return [f"requires.rtos '{rtos}' is not one of: {', '.join(RTOS_CHOICES)}"]
+
+    def managed_files(self, project_root, library):
+        """
+        The project's files this edits or reads as its own, which a once file
+        must never be: every IDE's project file, the Makefile, CubeMX's .ioc,
+        and the HAL configuration header.
+        """
+        return [self.record_name, "CMakeLists.txt", ".cproject", ".project", "*.uvprojx", "*.ewp",
+                "*.ewt", "*.eww", "Makefile", "*.ioc", "*_hal_conf.h"]
 
     def check(self, library, project_root):
         return checks.check(library, project_root)

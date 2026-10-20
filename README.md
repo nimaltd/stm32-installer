@@ -4,7 +4,7 @@ Installs embedded C libraries into an STM32 project.
 
 Copying two files into a project is easy. Doing it so the build actually picks them up, without clobbering the settings you changed last month, is the part this handles.
 
-It works with any library that has an `installer.yml` at the root of its repository. I wrote it for my own [NimaLTD](https://github.com/nimaltd) libraries, and they all have one, but nothing in it is tied to them: add an `installer.yml` to yours, as shown [below](#for-someone-writing-a-library), and it installs the same way.
+It works with any library that has an `installer.yml` at the root of its repository. I wrote it for my own [NimaLTD](https://github.com/nimaltd) libraries, and they all have one, but nothing in it is tied to them: add an `installer.yml` to yours, as shown [below](#for-someone-writing-a-library), and it installs the same way. The same file serves [zephyr-installer](https://github.com/nimaltd/zephyr-installer), [esp32-installer](https://github.com/nimaltd/esp32-installer), [arduino-installer](https://github.com/nimaltd/arduino-installer) and [pio-installer](https://github.com/nimaltd/pio-installer), so one library can be installed into an STM32 project, a Zephyr application, an ESP-IDF project, an Arduino sketch and a PlatformIO project alike.
 
 Every command below uses `owner/example`, the library's GitHub owner and name, such as `nimaltd/ee24`. Put the real ones in its place.
 
@@ -32,6 +32,8 @@ On Windows, if `stm32-installer` is not found after installing, pip put it in a 
 
 On Linux or macOS, if pip refuses with `externally-managed-environment`, use `pipx install stm32-installer` instead, and `pipx upgrade stm32-installer` to update.
 
+When a newer stm32-installer is out, the last line of a run says so, with the command that updates it. It asks PyPI at most once a day, waits no more than two seconds for an answer, and says nothing when there is none. `--no-update-check` turns it off, and so does `INSTALLER_NO_UPDATE_CHECK` set to anything. On a build server, where `CI` is set, it is off already.
+
 A library can need a newer installer than the one you have. It then says so and changes nothing:
 
 ```
@@ -39,6 +41,38 @@ Error: This library needs stm32-installer 1.2.0 or newer, and this one is 1.1.1.
 Update it with:
     pip install --upgrade stm32-installer
 ```
+
+### Every command
+
+Each command with `owner/example` standing for the library. An update is the install again. Every option is explained under [Options](#options).
+
+| To | Run |
+|---|---|
+| Install the installer | `pip install stm32-installer` |
+| Update the installer | `pip install --upgrade stm32-installer` |
+| Remove the installer | `pip uninstall stm32-installer` |
+| See which version you have | `stm32-installer --version` |
+| See every option | `stm32-installer --help` |
+| Install a library from GitHub | `stm32-installer owner/example` |
+| Install one release of it, a branch or a commit | `stm32-installer owner/example@v2.0.0` |
+| Install it by its GitHub address | `stm32-installer https://github.com/owner/example` |
+| Install it from a downloaded zip | `stm32-installer D:/Downloads/example-main.zip` |
+| Install it from a folder on disk | `stm32-installer D:/Downloads/example-main` |
+| Install several at once, such as a library and the zip of one it needs | `stm32-installer D:/Downloads/example-main.zip D:/Downloads/osal-main.zip` |
+| Install into a folder you choose, without the question | `stm32-installer owner/example --dir Libs/example` |
+| Install into a project you are not running from | `stm32-installer owner/example --project D:/Work/MyBoard` |
+| Register with one IDE only, of `cmake`, `cubeide`, `keil`, `iar` and `makefile` | `stm32-installer owner/example --ide cubeide` |
+| Take an option of the library without the question | `stm32-installer owner/example --with littlefs` |
+| Leave an option out, or take it out of a library already installed | `stm32-installer owner/example --without littlefs` |
+| Run a step of the library without the question | `stm32-installer owner/example --run make-key` |
+| Leave a step unrun, without the question | `stm32-installer owner/example --no-run make-key` |
+| Answer every question with the answer offered, and run every step, for a script | `stm32-installer owner/example --yes` |
+| Install from a private repository | `stm32-installer owner/example --key github_pat_...` |
+| Leave out the check for a newer installer | `stm32-installer owner/example --no-update-check` |
+| Update a library | `stm32-installer owner/example` |
+| Uninstall a library | `stm32-installer --uninstall example` |
+| Uninstall several, in any order | `stm32-installer --uninstall osal example` |
+| Run it when `stm32-installer` is not found | `python -m stm32_installer owner/example` |
 
 ### On a bad connection
 
@@ -145,6 +179,7 @@ The argument can be any of these, and you can give several at once:
 | You have | You type |
 |---|---|
 | Nothing yet, and internet | `stm32-installer owner/example` |
+| One release of it, a branch, or a commit | `stm32-installer owner/example@v2.0.0` |
 | The library's GitHub address | `stm32-installer https://github.com/owner/example` |
 | The zip from GitHub's **Download ZIP** | `stm32-installer D:/Downloads/example-main.zip` |
 | That zip unpacked, anywhere on disk | `stm32-installer D:/Downloads/example-main` |
@@ -154,16 +189,22 @@ A bare name with no owner, like `example`, is a NimaLTD library, `nimaltd/exampl
 
 The zip does not need unpacking first. If you did unpack it with Windows' **Extract All**, which puts `example-main` inside another `example-main`, either folder works. A repository still on `master` gives `example-master`, which works the same.
 
+From GitHub, a library comes from its repository's default branch, the one GitHub shows first, whatever the repository calls it. After an `@`, a tag, a branch or a commit takes exactly that instead, and so does a GitHub address ending in `/tree/v2.0.0`. Every file comes from one commit, even when the branch moves on while they download, and the record keeps that commit, so you can always tell what you built with.
+
 ### Options
 
 | Option | What it does |
 |---|---|
-| `--ref v2.0.0` | A tag, a branch or a commit to take from GitHub. When not given, `main`, or `master` for a repository that has no `main`. It applies to the libraries you name, and a library one of them needs always comes from its `main` or `master` |
+| `--ref v2.0.0` | A tag, a branch or a commit to take from GitHub, the same as `owner/example@v2.0.0`. When not given, the repository's default branch. It applies to the libraries you name, and a library one of them needs comes from the release its `installer.yml` names, or from its default branch |
 | `--dir Libs/example` | The folder of your project to install into, for one library. Asked for when not given, with the library's name as the answer if you just press Enter, or the folder it is already in |
 | `--project D:/Work/MyBoard` | Your project's root, when you are not running from it |
 | `--with littlefs` | Take this part of the library without being asked. Give it once for each part. See [Parts you choose](#parts-you-choose) |
 | `--without littlefs` | Leave this part out, or take it out of a library already installed |
 | `--ide cubeide` | Register with this IDE only: `cmake`, `cubeide`, `keil`, `iar` or `makefile`. Every one found, when not given |
+| `--run make-key` | Run this step of the library without being asked. Give it once for each step. See [Steps a library runs](#steps-a-library-runs) |
+| `--no-run make-key` | Leave this step unrun, without being asked |
+| `--yes` | Take the answer each question offers, without asking, and run every step. For a script or a build server |
+| `--no-update-check` | Do not ask PyPI whether a newer stm32-installer is out |
 | `--key github_pat_...` | A GitHub token, for a library in a private repository. See [A private repository](#a-private-repository) |
 | `--uninstall example` | Take the library out of the project. See [Uninstalling a library](#uninstalling-a-library) |
 | `--version` | Show which version of the installer you have, and do nothing else |
@@ -174,6 +215,7 @@ The zip does not need unpacking first. If you did unpack it with Windows' **Extr
 stm32-installer owner/example --ref v2.0.0         # a tag
 stm32-installer owner/example --ref develop        # a branch
 stm32-installer owner/example --ref 00949e695e16   # an exact commit
+stm32-installer owner/example@v2.0.0               # the same, for this library alone
 ```
 
 ### Where the files go
@@ -211,6 +253,35 @@ Options
 ```
 
 Change your mind with `--with` or `--without` on any later run. `--without littlefs` takes the part's files out of the library's folder and out of your IDE project. A library the part brought stays, since something else may use it by then. A part that a new version adds is asked about on that update. Keep `.stm32-installer.json` with your project, in version control: without it the installer remembers nothing, and asks again.
+
+### Files that become yours
+
+A library can bring files that belong to your project rather than to the library: a template of a port layer for you to fill in, a linker script section, a note for your own documentation. Each is a start, made for you to change, so it is created in your project's folder only when it is not there:
+
+```
+Files
+  written example/example.h
+  created Core/Src/example_port.c  yours from now on
+```
+
+From then on it is yours. An update never writes over it, and says so with `kept Core/Src/example_port.c  yours`. An uninstall leaves it where it is, with `kept Core/Src/example_port.c  yours, not removed`. It is not added to any IDE project either: it is your project's own file. STM32CubeIDE builds every file in its source folders, `Core/Src` among them, so there it is built with the rest. In a CMake, Keil or IAR project, which list their files one by one, add it the way you add a file of your own. A library can never put such a file over one the installer manages or CubeMX writes, such as `CMakeLists.txt`, `.cproject`, the `.ioc`, the Makefile or `stm32xxxx_hal_conf.h`, nor outside your project's folder.
+
+### Steps a library runs
+
+A library can need something made that no file can carry, such as a key made fresh for each product. It names a step for that, and once its files are in, the installer shows you exactly what will run, and asks:
+
+```
+Run
+  make-key     Make the product's key, product.key
+               python scripts/make_key.py product.key
+               Run it? [Y/n]:
+```
+
+Enter runs it, in your project's folder. A Python script runs with the same Python as the installer, so it works the same on every computer. `n` leaves it, and the output says how to run it later. In a script, where nobody can answer, it is not run.
+
+Nothing in a library's `installer.yml` can skip the question. Only you can: `--run make-key` runs that step without asking, `--no-run make-key` leaves it, and `--yes` runs every step and takes the offered answer to every other question, for a script or a build server.
+
+A step that makes a file can name it, and when that file is already in your project the step is skipped without a question, so a second install never makes a second key. A step that names no file and ran before is not asked about again either, until the library changes what it runs. When a step fails, what was installed stays installed, and the installer ends with exit code 1, so a script notices.
 
 ### Updating a library
 
@@ -276,7 +347,7 @@ Files
 Done. example is out of the project.
 ```
 
-What was yours is saved before it goes, as a `.bak` beside it: a configuration file the library created, and any file of the library you wrote in between its `USER CODE` lines or changed by hand. A file you put in the library's folder yourself is left where it is, and the folder with it. A define another installed library also asks for stays.
+What was yours is saved before it goes, as a `.bak` beside it: a configuration file the library created, and any file of the library you wrote in between its `USER CODE` lines or changed by hand. A file you put in the library's folder yourself is left where it is, and the folder with it, and so are the [files that became yours](#files-that-become-yours). A define another installed library also asks for stays.
 
 A library another one needs stays, and the installer says which needs it:
 
@@ -286,7 +357,7 @@ Error: spif needs osal, so it stays. Uninstall spif first, or name them all on o
 
 Name them all, in any order, and each goes after what needs it: `stm32-installer --uninstall osal spif`. When the library you took out brought another with it that nothing left in the project needs, the last line names it, with the command that takes it out too.
 
-Uninstall works from `.stm32-installer.json`, the record of what was installed and where. A library put in by hand, or a record that was deleted, leaves it nothing to go on. A library installed by a version before 1.11.0 comes out the same way, but its record does not say what it needed, so nothing is named at the end.
+Uninstall works from `.stm32-installer.json`, the record of what was installed and where. For each library it also keeps where it came from, down to the commit, the blocks written into your files, and the steps that ran. A library put in by hand, or a record that was deleted, leaves it nothing to go on. A library installed by a version before 1.11.0 comes out the same way, but its record does not say what it needed, so nothing is named at the end.
 
 ### A library that needs another
 
@@ -306,7 +377,7 @@ You are asked for its folder like any library. Install a second library that nee
 spif 3.0.0 needs osal >= 1.0.0. osal 1.0.0 is already in this project, kept.
 ```
 
-Nothing is asked about it then. If a library needs a newer `osal` than the one you have, it is updated where it is, and your setting in `osal_config.h`, between its `USER CODE` lines, is kept as always. Everything is fetched before anything is installed, so when a library cannot be had, your project is left as it was.
+Nothing is asked about it then. A library that goes in this way comes from the release the library needing it names, or else from its default branch. If a library needs a newer `osal` than the one you have, it is updated where it is, and your setting in `osal_config.h`, between its `USER CODE` lines, is kept as always. Everything is fetched before anything is installed, so when a library cannot be had, your project is left as it was.
 
 ### What you see
 
@@ -395,7 +466,7 @@ It cannot switch a peripheral on for you. The `.ioc` belongs to CubeMX, and edit
 
 ## For someone writing a library
 
-Put an `installer.yml` at the root of the repository. Any library can have one, whoever wrote it. Releases before 1.9.0 called it `library.yml`, and the installer still reads that name when there is no `installer.yml`, so a version pinned with `--ref` from before the rename installs as it always did. A library that renames its file says `requires.installer: 1.9.0`.
+Put an `installer.yml` at the root of the repository. Any library can have one, whoever wrote it, and the one file serves stm32-installer and the other installers alike: each reads its own keys and leaves the others' alone. Releases before 1.9.0 called it `library.yml`, and the installer still reads that name when there is no `installer.yml`, so a version pinned with `--ref` from before the rename installs as it always did. A library that renames its file says `requires.installer: 1.9.0`.
 
 Every key the installer reads is below, each with what it does. Only `name` and `files` are required; leave out what your library does not need. For a working one to copy, see [stm32-installer-example](https://github.com/nimaltd/stm32-installer-example).
 
@@ -413,10 +484,14 @@ category: sensor                   # sensor, storage, display, communication, wi
 provides: []                       # what it gives other libraries: [rtos] for an RTOS
 
 requires:
-  installer: 1.9.0                 # the oldest stm32-installer that reads this file
+  stm32_installer: 2.0.0           # the oldest stm32-installer that reads this file
   libraries:                       # other libraries, installed first when missing
     - osal >= 1.0.0                # no owner means nimaltd; >= the oldest that will do
     - owner/lib                    # anyone else's, as owner/name
+    - owner/lib@v1.2.0             # a tag, branch or commit, not its default branch
+    - source: owner/other@v2.9.3   # a repository with no installer.yml of its own,
+      manifest: manifests/other.yml  # with one this library carries for it
+      minimum: 2.9.0               # the oldest version that will do
   hal: true                        # uses the STM32 HAL
   cmsis: false                     # uses CMSIS directly
   rtos: optional                   # none, optional, any, freertos, cmsis-os2 or threadx
@@ -453,10 +528,17 @@ options:                           # parts the user chooses at install
       sources:
         - src/example_lfs.c
 
-once:                              # older libraries only: copied when missing, then
-                                   # the user's. USER CODE sections replace this
-  - from: src/example_port.c       # the file in the repository
-    to: my_port.c                  # its name in the project, when it changes
+once:                              # the project's own files: made when missing,
+                                   # then the user's, never replaced or removed
+  - from: templates/example_port.c # the file in the repository, to the project's folder
+    to: Core/Src/example_port.c    # its place in the project, when not its name
+
+run:                               # steps run once the files are in, each asked about first
+  - label: make-key                # the name typed after --run
+    description: Make the product's key, product.key  # shown with the question
+    script: scripts/make_key.py    # Python, run with the installer's own Python,
+    args: [product.key]            # or command: [program, arguments], with no shell
+    unless: product.key            # skipped when this file is in the project already
 
 extras:                            # copied as they are, never compiled
   - LICENSE.md                     # LICENSE.md and NOTICE are the default,
@@ -476,19 +558,29 @@ Leave `version` out. The installer reads the version from the `@version` tag in 
  */
 ```
 
-`requires.installer` is the oldest stm32-installer that reads the file correctly. It is checked before anything else in the file is read, so when a manifest starts using something only a newer installer understands, raising this makes an older one stop with a message saying to update, rather than read the file wrongly without a word. Write it as three numbers, `1.1.0`: unquoted, YAML reads `1.10` as the decimal number `1.1`, and that is refused.
+`requires.stm32_installer` is the oldest stm32-installer that reads the file correctly. It is checked before anything else in the file is read, so when a manifest starts using something only a newer installer understands, raising this makes an older one stop with a message saying to update, rather than read the file wrongly without a word. Write it as three numbers, `1.1.0`: unquoted, YAML reads `1.10` as the decimal number `1.1`, and that is refused.
+
+Before 2.0.0 the key was `requires.installer`, and it still works. It is named after the installer now, as every other installer's key is, so a reader of the file knows which installer it is for. One thing to know: an installer older than 2.0.0 reads only `requires.installer`, so a library that has to stop those older ones writes `installer: 2.0.0`, instead of the new key or as well.
+
+A library that uses anything 2.0.0 brings asks for 2.0.0: `once` files in the project's folder, `run`, or a library it needs given with an `@` or a `manifest`. The version also decides where `once` files go, as [below](#once).
 
 `requires.libraries` lists the libraries yours needs, each as its name, or its name with the oldest version that will do:
 
 ```yaml
 requires:
-  installer: 1.5.0      # the first that installs them, rather than only naming them
+  stm32_installer: 2.0.0
   libraries:
-    - osal >= 1.0.0     # no owner means nimaltd: github.com/nimaltd/osal
-    - someone/lib       # anyone else's, by owner and name
+    - osal >= 1.0.0                    # no owner means nimaltd: github.com/nimaltd/osal
+    - someone/lib                      # anyone else's, by owner and name
+    - someone/lib@v1.2.0               # exactly this tag, branch or commit
+    - source: littlefs-project/littlefs@v2.11.0
+      manifest: manifests/littlefs.yml # an installer.yml for a repository without one
+      minimum: 2.11.0
 ```
 
-What is missing or older than that goes in first, from its `main`, or its `master` when it has no `main`. What is already in the project at a version that will do is left alone. An installer older than 1.5.0 only names them at the end and installs nothing, which is why `requires.installer` goes up with the first library that lists any.
+What is missing or older than that goes in first, from its repository's default branch, or from the tag, branch or commit after its `@`. What is already in the project at a version that will do is left alone. An installer older than 1.5.0 only names them at the end and installs nothing.
+
+The last form installs a library whose repository has no `installer.yml` of its own: yours carries one for it, at the path given, written as if it sat at the root of that repository.
 
 ### defines
 
@@ -541,17 +633,54 @@ A library that moves a file from `once` into `files` this way must say `requires
 
 ### once
 
-A file listed under `once` is copied only when it is missing, so the user's own edits survive every update. Libraries released before 1.7.0 use it, and it still works the same. It keeps its own name unless you give it a `to`, and it lands at the top of the library's folder whatever the layout. With `mirror`, give a configuration header a `to` that puts it beside the header including it, as above. At the top, the include path the layout gives would not reach it.
+A file that belongs to the project rather than to the library goes under `once`: a port layer someone fills in, a template of their own code, anything that is the library's to start and theirs from then on. It is created in the project's folder when it is missing, and is the user's from then on: never replaced by an update, never removed by an uninstall.
 
-The key says what happens rather than what the file is. It is usually a configuration header, but the same rule fits a port layer someone fills in, or a table they tune: anything that is the library's to start and theirs from then on.
+```yaml
+once:
+  - from: templates/example_port.c     # the file in the repository
+    to: Core/Src/example_port.c        # its place from the project's folder
+```
+
+`from` is a file of the library's repository, and `to` its place from the project's folder, its own name when left out. The file is the project's own, so the installer adds it to no IDE project. STM32CubeIDE builds every file in its source folders, such as CubeMX's `Core/Src`, and has `Core/Inc` on its include path; a CMake, Keil or IAR project lists its files one by one, and the user adds it there. Say so in your README.
+
+Each is checked before anything is written. `to` stays inside the project, names none of the files the installer manages or CubeMX writes, `CMakeLists.txt`, `.cproject`, `.project`, the Keil and IAR projects, the Makefile, the `.ioc`, `stm32xxxx_hal_conf.h` and the record, and does not point into the library's own folder, which every install replaces. Two entries with one `to` are refused. And `from`, like every file a manifest names, stays inside the library: no `..`, no absolute path, no link leading out of it.
+
+Settings the user changes belong in USER CODE sections of the library's own files, not in `once`.
+
+**Libraries written for an installer before 2.0.0** keep the meaning `once` had then, so a release tagged before still installs and builds as it did: the file lands in the library's own folder, at its top whatever the layout, and is added to the build. The version `requires` asks for decides which meaning a manifest gets. The rest of this section is about that older meaning.
+
+With `mirror`, give a configuration header a `to` that puts it beside the header including it. At the top, the include path the layout gives would not reach it.
 
 One catch worth knowing: `#include "x.h"` searches the including file's own folder before any include path, so a config sitting beside the header that includes it will always win. That is fine when the library's tests use the same config, and it is why the NimaLTD libraries test against a setting such as `EXAMPLE_MAX_TASKS` rather than a fixed number.
 
 The include path follows the layout on its own: `flat` gives the library folder, `mirror` gives wherever the headers landed. Add `install.include_dirs` only when that guess is wrong.
 
-Three things about this that are easy to get wrong:
+### run
 
-**A `.c` template is a source.** If you ship a port layer as `src/example_port.c` that lands as `my_port.c`, it is added to the build like any other source. Leaving it out would fail at link time with undefined references and no clue why.
+Something no file can carry, such as a key made fresh for each product, is made by a step under `run`. It runs once the library's files are in, in the project's folder:
+
+```yaml
+run:
+  - label: make-key
+    description: Make the product's key, product.key
+    script: scripts/make_key.py
+    args: [product.key]
+    unless: product.key
+```
+
+- `label` names the step, typed after `--run`, in lower case letters, digits, `_` and `-`.
+- `description` is shown with the question.
+- `script` is a Python file of the library, run with the installer's own Python, so it works on every computer the installer does. Or `command`, a program and its arguments as a list, `[openssl, rand, -out, product.key, "32"]`, run as it is, with no shell. One of the two, never both.
+- `args` are added after either.
+- `unless` names a file the step makes, from the project's folder. When it is there, the step is skipped without a question.
+
+The step sees where things are in its environment: `INSTALLER_PROJECT`, the project's folder, `INSTALLER_LIBRARY`, the library's folder in it, `INSTALLER_NAME` and `INSTALLER_VERSION`, the library's, and `INSTALLER`, `stm32-installer`.
+
+The user is always asked, and is shown exactly what will run. Nothing in the manifest can turn that off, only the user, with `--run` or `--yes`. A step with no `unless` that ran before is not asked about again until what it runs changes, so make it safe to run twice anyway. A step that fails leaves the install as it is and ends the run with exit code 1.
+
+### Easy to get wrong
+
+**A `.c` file is built only when it is listed.** A port layer under `files.sources` is built like any other source. One under `once`, for a manifest asking for 2.0.0, is the project's and is added to no IDE project, so a port layer every user needs belongs in `files`, with its settings in USER CODE sections. Getting this wrong fails at link time with undefined references and no clue why.
 
 **`kind: rtos` implies `provides: [rtos]`.** A library that is an operating system satisfies another library's RTOS requirement, whether or not you remembered to write it down.
 
