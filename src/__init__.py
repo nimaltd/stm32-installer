@@ -1,41 +1,18 @@
 """
-Install embedded C libraries into an STM32 project.
+stm32-installer is now lib-installer.
 
-Installed with pip, it is the stm32-installer command. It takes a library from
-GitHub, from a downloaded zip, or from a folder.
-
-The work that is the same for any project is the shared core, in core/, from
-github.com/nimaltd/core-installer. What an STM32 project is, is in stm32.py.
-
-See https://github.com/nimaltd/stm32-installer
+This last release only says so. lib-installer does what stm32-installer did, for
+STM32, Zephyr, ESP-IDF, Arduino and PlatformIO alike, with the same commands:
+https://github.com/nimaltd/lib-installer
 """
 
-__version__ = "2.1.0"
+__version__ = "3.0.0"
 
-# Before anything of the core is used: it asks the platform for every answer
-# that depends on the kind of project.
-from .core import target as _target  # noqa: E402
-from .stm32 import Stm32  # noqa: E402
-
-_target.use(Stm32(__version__))
-
-from .core.installer import InstallError, Result, install_in_place, install_to  # noqa: E402
-from .core.manifest import Manifest, ManifestError, load  # noqa: E402
-
-__all__ = [
-    "InstallError",
-    "Manifest",
-    "ManifestError",
-    "Result",
-    "install_in_place",
-    "install_to",
-    "load",
-    "main",
-]
+__all__ = ["main"]
 
 
-def main(argv=None, library_root=None):
-    """Run the command line interface. Imported lazily to keep start-up cheap."""
+def main(argv=None):
+    """Say where stm32-installer went. Returns a process exit code."""
     from .cli import main as _main
 
-    return _main(argv=argv, library_root=library_root)
+    return _main(argv=argv)

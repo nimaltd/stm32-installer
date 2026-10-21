@@ -8,29 +8,18 @@ on:
 
 jobs:
   test:
-    name: Tests on Python ${{ matrix.python }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        python: ["3.8", "3.12"]
-
+    name: Tests
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: true
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: ${{ matrix.python }}
+          python-version: "3.12"
 
       - name: Install
-        run: python -m pip install --upgrade pip pytest PyYAML
+        run: python -m pip install --upgrade pip pytest
 
-      # Windows is in the matrix on purpose. Most of this tool's users are on
-      # Windows, and the parts that break there are exactly the parts that
-      # matter: read-only files under .git, and backslash paths for Keil.
       - name: Test
         run: python test/run_tests.py
 
@@ -39,8 +28,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-        with:
-          submodules: true
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:

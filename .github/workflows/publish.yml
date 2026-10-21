@@ -12,11 +12,7 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     steps:
-      # With the shared core, a git submodule. Without it the wheel has no core,
-      # and the run below stops it before anything is uploaded.
       - uses: actions/checkout@v7
-        with:
-          submodules: true
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:

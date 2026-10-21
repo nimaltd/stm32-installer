@@ -1,3 +1,0 @@
-[submodule "src/core"]
-	path = src/core
-	url = ../core-installer.git
