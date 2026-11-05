@@ -1,5 +1,5 @@
 """
-The stm32-installer command, now only a pointer to lib-installer.
+The stm32-installer command, now only a pointer to libNIMA.
 
 --version still answers, so a script that checks it keeps working. Anything
 else says where the installer went and what to type there, and installs
@@ -24,17 +24,20 @@ def main(argv=None):
         print(f"{NAME} {__version__}")
         return 0
 
-    same = "lib-installer " + (shlex.join(argv) if argv else "owner/example")
+    same = "libnima " + (shlex.join(argv) if argv else "owner/example")
     print(
-        f"{NAME} is now lib-installer: one installer for STM32, Zephyr, ESP-IDF,\n"
-        "Arduino and PlatformIO, with the same commands. Nothing was installed.\n"
+        f"{NAME} is now libNIMA: one installer for STM32, Zephyr, ESP-IDF, Arduino\n"
+        "and PlatformIO, with a window and the libnima command, and no Python.\n"
+        "Nothing was installed.\n"
+        "\n"
+        "Download libNIMA from https://github.com/nimaltd/libNIMA/releases/latest,\n"
+        "then:\n"
         "\n"
         f"    pip uninstall {NAME}\n"
-        "    pip install lib-installer\n"
         f"    {same}\n"
         "\n"
         f"An STM32 project {NAME} installed into moves over by itself on the first run.\n"
-        "https://github.com/nimaltd/lib-installer",
+        "https://github.com/nimaltd/libNIMA",
         file=sys.stderr,
     )
 

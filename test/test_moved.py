@@ -21,16 +21,16 @@ def test_a_run_says_what_to_type_and_installs_nothing(capsys):
 
     said = capsys.readouterr().err
 
-    assert "stm32-installer is now lib-installer" in said
+    assert "stm32-installer is now libNIMA" in said
+    assert "https://github.com/nimaltd/libNIMA/releases/latest" in said
     assert "pip uninstall stm32-installer" in said
-    assert "pip install lib-installer" in said
-    assert "lib-installer nimaltd/ee24 --dir 'Libs/my ee24'" in said
+    assert "libnima nimaltd/ee24 --dir 'Libs/my ee24'" in said
     assert "Nothing was installed." in said
 
 
 def test_a_run_with_nothing_given_says_the_same(capsys):
     assert cli.main([]) == 1
-    assert "lib-installer owner/example" in capsys.readouterr().err
+    assert "libnima owner/example" in capsys.readouterr().err
 
 
 def test_the_command_is_still_called_stm32_installer():
@@ -38,4 +38,4 @@ def test_the_command_is_still_called_stm32_installer():
 
 
 def test_the_version_is_the_packages():
-    assert __version__ == "3.0.0"
+    assert __version__ == "3.0.1"

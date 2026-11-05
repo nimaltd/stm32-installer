@@ -8,7 +8,7 @@ name = "stm32-installer"
 # Read from stm32_installer.__version__, so the version lives in exactly one
 # place and cannot drift between the package and its metadata.
 dynamic = ["version"]
-description = "Now lib-installer: install embedded C libraries into STM32, Zephyr, ESP-IDF, Arduino and PlatformIO projects"
+description = "Now libNIMA: install embedded C libraries into STM32, Zephyr, ESP-IDF, Arduino and PlatformIO projects"
 readme = "README.md"
 requires-python = ">=3.8"
 license = "Apache-2.0"
